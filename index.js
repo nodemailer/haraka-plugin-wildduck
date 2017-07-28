@@ -36,6 +36,8 @@ exports.open_database = function(next) {
             return next(err);
         }
         plugin.database = database;
+        plugin.usersdb = plugin.cfg.mongo.users ? database.db(plugin.cfg.mongo.users) : database;
+        plugin.gridfsdb = plugin.cfg.mongo.gridfs ? database.db(plugin.cfg.mongo.gridfs) : database;
         next();
     });
 };
@@ -75,7 +77,7 @@ exports.hook_rcpt = function(next, connection, params) {
     plugin.logdebug('Checking validity of ' + address);
 
     // check if address exists
-    plugin.database.collection('addresses').findOne({
+    plugin.usersdb.collection('addresses').findOne({
         address
     }, (err, addressObj) => {
         if (err) {
@@ -86,12 +88,13 @@ exports.hook_rcpt = function(next, connection, params) {
         }
 
         // load user for quota checks
-        plugin.database.collection('users').findOne({
+        plugin.usersdb.collection('users').findOne({
             _id: addressObj.user
         }, {
             fields: {
                 quota: true,
-                storageUsed: true
+                storageUsed: true,
+                disabled: true
             }
         }, (err, user) => {
             if (err) {
@@ -102,8 +105,16 @@ exports.hook_rcpt = function(next, connection, params) {
                 return next(DENY, DSN.no_such_user());
             }
 
-            if (user.quota && user.storageUsed && user.quota <= user.storageUsed) {
-                // can not deliver mail to this user
+            if (user.disabled) {
+                // user is disabled for whatever reason
+                return next(DENY, DSN.mbox_disabled());
+            }
+
+            // max quota for the user
+            let quota = user.quota || Number(plugin.cfg.maxStorage) * 1024;
+
+            if (user.storageUsed && quota <= user.storageUsed) {
+                // can not deliver mail to this user, over quota
                 return next(DENY, DSN.mbox_full());
             }
 
