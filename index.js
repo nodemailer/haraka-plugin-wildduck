@@ -5,7 +5,7 @@
 
 const mongodb = require('mongodb');
 const MongoClient = mongodb.MongoClient;
-const DSN = require('Haraka/dsn');
+const DSN = require('./dsn');
 const punycode = require('punycode');
 
 exports.register = function() {
