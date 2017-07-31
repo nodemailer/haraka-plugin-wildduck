@@ -78,7 +78,7 @@ exports.hook_rcpt = function(next, connection, params) {
 
     // check if address exists
     plugin.usersdb.collection('addresses').findOne({
-        address
+        addrview: address.substr(0, address.indexOf('@')).replace(/\./g, '') + address.substr(address.indexOf('@'))
     }, (err, addressObj) => {
         if (err) {
             return next(err);
