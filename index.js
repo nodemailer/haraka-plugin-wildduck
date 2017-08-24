@@ -7,6 +7,7 @@ const mongodb = require('mongodb');
 const MongoClient = mongodb.MongoClient;
 const DSN = require('./dsn');
 const punycode = require('punycode');
+const SRS = require('srs.js');
 
 exports.register = function() {
     let plugin = this;
@@ -31,6 +32,10 @@ exports.load_wildduck_ini = function() {
 exports.open_database = function(next) {
     let plugin = this;
 
+    plugin.srsRewriter = new SRS({
+        secret: plugin.cfg.srs.secret
+    });
+
     MongoClient.connect(plugin.cfg.mongo.url, (err, database) => {
         if (err) {
             return next(err);
@@ -43,6 +48,20 @@ exports.open_database = function(next) {
 };
 
 exports.normalize_address = function(address) {
+    let domain = address.host.toLowerCase().trim();
+
+    if (/^SRS\d+=/i.test(address.user)) {
+        // Try to fix case-mangled addresses where the intermediate MTA converts user part to lower case
+        // and thus breaks hash verification
+        let localAddress = address.user
+            // ensure that address starts with uppercase SRS
+            .replace(/^SRS\d+=/i, val => val.toUpperCase())
+            // ensure that the first entity that looks like timestamp is uppercase
+            .replace(/([-=+][0-9a-f]{4})(=[A-Z2-7]{2}=)/i, (str, sig, ts) => sig + ts.toUpperCase());
+
+        return localAddress + '@' + punycode.toUnicode(domain);
+    }
+
     let user = address.user
         // just in case it is an unicode username
         .normalize('NFC')
@@ -50,8 +69,6 @@ exports.normalize_address = function(address) {
         .replace(/\+.*$/, '')
         .toLowerCase()
         .trim();
-
-    let domain = address.host.toLowerCase().trim();
 
     return user + '@' + punycode.toUnicode(domain);
 };
@@ -75,6 +92,29 @@ exports.hook_rcpt = function(next, connection, params) {
     let address = plugin.normalize_address(rcpt);
 
     plugin.logdebug('Checking validity of ' + address);
+
+    if (/^SRS\d+=/.test(address)) {
+        let reversed = false;
+        try {
+            reversed = plugin.srsRewriter.reverse(address);
+            let toDomain = punycode.toASCII((reversed[1] || '').toString().toLowerCase().trim());
+
+            if (!toDomain) {
+                plugin.logerror('SRS check failed for ' + address + '. Missing domain');
+                return next(DENY, DSN.no_such_user());
+            }
+
+            reversed = reversed.join('@');
+        } catch (E) {
+            plugin.logerror('SRS check failed for ' + address + '. ' + E.message);
+            return next(DENY, DSN.no_such_user());
+        }
+
+        if (reversed) {
+            // accept SRS rewritten address
+            return next(OK);
+        }
+    }
 
     // check if address exists
     plugin.usersdb.collection('addresses').findOne({
