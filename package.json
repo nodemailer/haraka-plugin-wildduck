@@ -30,10 +30,13 @@
         "eslint-config-nodemailer": "^1.2.0",
         "grunt": "^1.0.1",
         "grunt-cli": "^1.2.0",
-        "grunt-eslint": "^20.0.0"
+        "grunt-eslint": "^20.1.0"
     },
     "dependencies": {
+        "hi-base32": "^0.3.0",
         "mongodb": "^2.2.31",
-        "srs.js": "^0.1.0"
+        "redis": "^2.8.0",
+        "srs.js": "^0.1.0",
+        "wildduck": "^1.0.75"
     }
 }
