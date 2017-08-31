@@ -138,7 +138,7 @@ exports.hook_rcpt = function(next, connection, params) {
             ip: connection.remote.ip
         };
 
-        plugin.userHandler.create(userData, (err, id) => {
+        plugin.db.userHandler.create(userData, (err, id) => {
             if (err) {
                 plugin.logerror('Failed to create account for "' + address + '". ' + err.message);
                 return next(DENY, DSN.no_such_user());
