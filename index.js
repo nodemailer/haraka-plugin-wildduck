@@ -131,10 +131,10 @@ exports.hook_rcpt = function(next, connection, params) {
         let userData = {
             username,
             address,
-            recipients: Number(plugin.cfg.maxRecipients || 0),
-            forwards: Number(plugin.cfg.maxForwards || 0),
-            quota: Number(plugin.cfg.maxStorage || 0) * 1024 * 1024,
-            retention: Number(plugin.cfg.retention || 0),
+            recipients: Number(plugin.cfg.main.maxRecipients || 0),
+            forwards: Number(plugin.cfg.main.maxForwards || 0),
+            quota: Number(plugin.cfg.main.maxStorage || 0) * 1024 * 1024,
+            retention: Number(plugin.cfg.main.retention || 0),
             ip: connection.remote.ip
         };
 
@@ -161,7 +161,7 @@ exports.hook_rcpt = function(next, connection, params) {
             }
 
             if (!userData) {
-                if (plugin.cfg.createAccounts) {
+                if (plugin.cfg.main.createAccounts) {
                     return createAccount();
                 }
                 return next(DENY, DSN.no_such_user());
@@ -172,7 +172,7 @@ exports.hook_rcpt = function(next, connection, params) {
             }
 
             // max quota for the user
-            let quota = userData.quota || Number(plugin.cfg.maxStorage || 0) * 1024 * 1024;
+            let quota = userData.quota || Number(plugin.cfg.main.maxStorage || 0) * 1024 * 1024;
 
             if (userData.storageUsed && quota <= userData.storageUsed) {
                 // can not deliver mail to this user, over quota
