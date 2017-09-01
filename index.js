@@ -3,12 +3,16 @@
 
 'use strict';
 
+// disable config loading by Wild Duck
+process.env.DISABLE_WILD_CONFIG = 'true';
+
 const db = require('./lib/db');
 const DSN = require('./dsn');
 const punycode = require('punycode');
 const base32 = require('hi-base32');
 const SRS = require('srs.js');
 const crypto = require('crypto');
+const tools = require('wildduck/lib/tools');
 
 exports.register = function() {
     let plugin = this;
@@ -22,7 +26,7 @@ exports.load_wildduck_ini = function() {
     plugin.cfg = plugin.config.get(
         'wildduck.ini',
         {
-            booleans: ['createAccounts']
+            booleans: ['accounts.createMissing']
         },
         () => {
             plugin.load_wildduck_ini();
@@ -47,8 +51,6 @@ exports.open_database = function(next) {
 };
 
 exports.normalize_address = function(address) {
-    let domain = address.host.toLowerCase().trim();
-
     if (/^SRS\d+=/i.test(address.user)) {
         // Try to fix case-mangled addresses where the intermediate MTA converts user part to lower case
         // and thus breaks hash verification
@@ -58,18 +60,10 @@ exports.normalize_address = function(address) {
             // ensure that the first entity that looks like timestamp is uppercase
             .replace(/([-=+][0-9a-f]{4})(=[A-Z2-7]{2}=)/i, (str, sig, ts) => sig + ts.toUpperCase());
 
-        return localAddress + '@' + punycode.toUnicode(domain);
+        return localAddress + '@' + punycode.toUnicode(address.host.toLowerCase().trim());
     }
 
-    let user = address.user
-        // just in case it is an unicode username
-        .normalize('NFC')
-        // remove +label
-        .replace(/\+.*$/, '')
-        .toLowerCase()
-        .trim();
-
-    return user + '@' + punycode.toUnicode(domain);
+    return tools.normalizeAddress(address.address());
 };
 
 exports.hook_init_master = function(next) {
@@ -121,20 +115,30 @@ exports.hook_rcpt = function(next, connection, params) {
     }
 
     let createAccount = () => {
-        let username = base32.encode(
-            crypto
-                .createHash('md5')
-                .update(address.substr(0, address.indexOf('@')).replace(/\./g, '') + address.substr(address.indexOf('@')))
-                .digest()
-        );
+        let domain = address.substr(address.lastIndexOf('@') + 1);
+
+        if (!plugin.cfg.accounts.hosts.includes('*') && !plugin.cfg.accounts.hosts.includes(domain)) {
+            plugin.logerror('Failed to create account for "' + address + '". Domain "' + domain + '" not allowed');
+            return next(DENY, DSN.no_such_user());
+        }
+
+        let username = base32
+            .encode(
+                crypto
+                    .createHash('md5')
+                    .update(address.substr(0, address.indexOf('@')).replace(/\./g, '') + address.substr(address.indexOf('@')))
+                    .digest()
+            )
+            .toLowerCase()
+            .replace(/[=]+$/g, '');
 
         let userData = {
             username,
             address,
-            recipients: Number(plugin.cfg.main.maxRecipients || 0),
-            forwards: Number(plugin.cfg.main.maxForwards || 0),
-            quota: Number(plugin.cfg.main.maxStorage || 0) * 1024 * 1024,
-            retention: Number(plugin.cfg.main.retention || 0),
+            recipients: Number(plugin.cfg.accounts.maxRecipients) || 0,
+            forwards: Number(plugin.cfg.accounts.maxForwards) || 0,
+            quota: Number(plugin.cfg.accounts.maxStorage || 0) * 1024 * 1024,
+            retention: Number(plugin.cfg.accounts.retention) || 0,
             ip: connection.remote.ip
         };
 
@@ -143,7 +147,7 @@ exports.hook_rcpt = function(next, connection, params) {
                 plugin.logerror('Failed to create account for "' + address + '". ' + err.message);
                 return next(DENY, DSN.no_such_user());
             }
-            plugin.loginfo('Create account for "' + address + '" with id "' + id + '"');
+            plugin.loginfo('Created account for "' + address + '" with id "' + id + '"');
             next(OK);
         });
     };
@@ -161,7 +165,7 @@ exports.hook_rcpt = function(next, connection, params) {
             }
 
             if (!userData) {
-                if (plugin.cfg.main.createAccounts) {
+                if (plugin.cfg.accounts.createMissing) {
                     return createAccount();
                 }
                 return next(DENY, DSN.no_such_user());
@@ -172,7 +176,7 @@ exports.hook_rcpt = function(next, connection, params) {
             }
 
             // max quota for the user
-            let quota = userData.quota || Number(plugin.cfg.main.maxStorage || 0) * 1024 * 1024;
+            let quota = userData.quota || Number(plugin.cfg.accounts.maxStorage || 0) * 1024 * 1024;
 
             if (userData.storageUsed && quota <= userData.storageUsed) {
                 // can not deliver mail to this user, over quota
