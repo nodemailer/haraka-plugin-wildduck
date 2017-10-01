@@ -26,7 +26,7 @@ exports.load_wildduck_ini = function() {
     plugin.cfg = plugin.config.get(
         'wildduck.ini',
         {
-            booleans: ['accounts.createMissing']
+            booleans: ['accounts.createMissing', 'attachments.decodeBase64']
         },
         () => {
             plugin.load_wildduck_ini();
@@ -57,7 +57,7 @@ exports.normalize_address = function(address) {
         let localAddress = address.user
             // ensure that address starts with uppercase SRS
             .replace(/^SRS\d+=/i, val => val.toUpperCase())
-            // ensure that the first entity that looks like timestamp is uppercase
+            // ensure that the first entity that looks like SRS timestamp is uppercase
             .replace(/([-=+][0-9a-f]{4})(=[A-Z2-7]{2}=)/i, (str, sig, ts) => sig + ts.toUpperCase());
 
         return localAddress + '@' + punycode.toUnicode(address.host.toLowerCase().trim());
@@ -170,6 +170,7 @@ exports.hook_rcpt = function(next, connection, params) {
                 }
                 return next(DENY, DSN.no_such_user());
             }
+
             if (userData.disabled) {
                 // user is disabled for whatever reason
                 return next(DENY, DSN.mbox_disabled());
