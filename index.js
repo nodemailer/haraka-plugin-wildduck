@@ -24,7 +24,7 @@ exports.load_wildduck_ini = function() {
     let plugin = this;
 
     plugin.cfg = plugin.config.get(
-        'wildduck.ini',
+        'wildduck.yaml',
         {
             booleans: ['accounts.createMissing', 'attachments.decodeBase64']
         },
