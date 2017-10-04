@@ -18,6 +18,9 @@ exports.register = function() {
     let plugin = this;
     plugin.logdebug('Initializing rcpt_to Wild Duck plugin.');
     plugin.load_wildduck_ini();
+
+    plugin.register_hook('init_master', 'init_wildduck_shared');
+    plugin.register_hook('init_child', 'init_wildduck_shared');
 };
 
 exports.load_wildduck_ini = function() {
@@ -34,18 +37,19 @@ exports.load_wildduck_ini = function() {
     );
 };
 
-exports.open_database = function(next) {
+exports.open_database = function(server, next) {
     let plugin = this;
 
     plugin.srsRewriter = new SRS({
         secret: plugin.cfg.srs.secret
     });
 
-    db.connect(plugin.cfg, (err, database) => {
+    db.connect(server.notes.redis, plugin.cfg, (err, database) => {
         if (err) {
             return next(err);
         }
         plugin.db = database;
+        plugin.loginfo('Database connection opened');
         next();
     });
 };
@@ -66,16 +70,10 @@ exports.normalize_address = function(address) {
     return tools.normalizeAddress(address.address());
 };
 
-exports.hook_init_master = function(next) {
+exports.init_wildduck_shared = function(next, server) {
     let plugin = this;
 
-    plugin.open_database(next);
-};
-
-exports.hook_init_child = function(next) {
-    let plugin = this;
-
-    plugin.open_database(next);
+    plugin.open_database(server, next);
 };
 
 exports.hook_rcpt = function(next, connection, params) {
