@@ -1,5 +1,5 @@
 /* eslint-env es6 */
-/* globals DENY: false, OK: false */
+/* globals DENY: false, OK: false, DENYSOFT: false */
 
 'use strict';
 
@@ -12,7 +12,16 @@ const punycode = require('punycode');
 const base32 = require('hi-base32');
 const SRS = require('srs.js');
 const crypto = require('crypto');
+const counters = require('wildduck/lib/counters');
 const tools = require('wildduck/lib/tools');
+
+DSN.rcpt_too_fast = () =>
+    DSN.create(
+        450,
+        '450-4.2.1 The user you are trying to contact is receiving mail at a rate that\nprevents additional messages from being delivered. Please resend your\nmessage at a later time. If the user is able to receive mail at that\ntime, your message will be delivered.',
+        2,
+        1
+    );
 
 exports.register = function() {
     let plugin = this;
@@ -49,6 +58,7 @@ exports.open_database = function(server, next) {
             return next(err);
         }
         plugin.db = database;
+        plugin.ttlcounter = counters(database.redis).ttlcounter;
         plugin.loginfo('Database connection opened');
         next();
     });
@@ -108,7 +118,17 @@ exports.hook_rcpt = function(next, connection, params) {
 
         if (reversed) {
             // accept SRS rewritten address
-            return next(OK);
+            return plugin.rateLimit(connection, 'rcpt', reversed, (err, success) => {
+                if (err) {
+                    return next(err);
+                }
+
+                if (!success) {
+                    return next(DENYSOFT, DSN.rcpt_too_fast());
+                }
+
+                return next(OK);
+            });
         }
     }
 
@@ -146,7 +166,18 @@ exports.hook_rcpt = function(next, connection, params) {
                 return next(DENY, DSN.no_such_user());
             }
             plugin.loginfo('Created account for "' + address + '" with id "' + id + '"');
-            next(OK);
+
+            return plugin.rateLimit(connection, 'rcpt', address, (err, success) => {
+                if (err) {
+                    return next(err);
+                }
+
+                if (!success) {
+                    return next(DENYSOFT, DSN.rcpt_too_fast());
+                }
+
+                return next(OK);
+            });
         });
     };
 
@@ -185,4 +216,24 @@ exports.hook_rcpt = function(next, connection, params) {
             next(OK);
         }
     );
+};
+
+exports.rateLimit = function(connection, key, value, next) {
+    let plugin = this;
+
+    let limit = plugin.cfg.limits[key];
+    if (!limit) {
+        return next(null, true);
+    }
+    let windowSize = plugin.cfg.limits[key + 'WindowSize'] || plugin.cfg.limits.windowSize || 1 * 3600 * 1000;
+
+    plugin.ttlcounter('rl:' + key + ':' + value, 1, limit, windowSize, (err, result) => {
+        if (err) {
+            return next(err);
+        }
+
+        connection.logdebug(plugin, 'key=' + key + ' limit=' + limit + ' value=' + result.value + ' ttl=' + result.ttl);
+
+        return next(null, result.success);
+    });
 };
