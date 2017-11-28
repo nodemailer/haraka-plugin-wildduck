@@ -10,7 +10,15 @@
         "type": "git",
         "url": "git://github.com/nodemailer/haraka-plugin-wildduck.git"
     },
-    "keywords": ["MX", "SMTP", "Haraka", "Wild", "Duck", "IMAP", "LMTP"],
+    "keywords": [
+        "MX",
+        "SMTP",
+        "Haraka",
+        "Wild",
+        "Duck",
+        "IMAP",
+        "LMTP"
+    ],
     "author": "Andris Reinman",
     "license": "EUPL-1.1",
     "bugs": {
@@ -18,7 +26,7 @@
     },
     "homepage": "https://github.com/nodemailer/haraka-plugin-wildduck#readme",
     "devDependencies": {
-        "eslint": "^4.9.0",
+        "eslint": "^4.12.0",
         "eslint-config-nodemailer": "^1.2.0",
         "grunt": "^1.0.1",
         "grunt-cli": "^1.2.0",
@@ -26,9 +34,9 @@
     },
     "dependencies": {
         "hi-base32": "^0.3.0",
-        "ioredis": "^3.1.4",
+        "ioredis": "^3.2.1",
         "mongodb": "^2.2.33",
         "srs.js": "^0.1.0",
-        "wildduck": "^1.0.86"
+        "wildduck": "^1.0.92"
     }
 }
