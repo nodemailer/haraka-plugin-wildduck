@@ -1,31 +1,15 @@
 ---
-accounts:
-
-  # default quota in megabytes (if not set for an user)
-  maxStorage: 1024
-
-  # if yes then autogenerate a new account for every unknown recipient
-  # in normal conditions you don't want to do this
-  createMissing: false
-
-  # default settings for the newly generated accounts
-  maxRecipients: 2000
-  maxForwards: 2000
-  retention: 0
-
-  # an array of allowed hostnames for new accounts
-  hosts:
-    - "*"
 
 ## Connect to a master instance or Redis
 ## Not needed if haraka-plugin-redis or haraka-plugin-ioredis is already present
-#redis:
-#  port: 6379
-#  host: "127.0.0.1"
-#  db: 3
+redis:
+
+  port: 6379
+  host: "127.0.0.1"
+  db: 3
 #  password: ""
 
-## Connect to Redis Sentinel
+## Or alternatively, connect to Redis Sentinel
 # redis:
 #   name: "mymaster"
 #   password: ""
@@ -40,15 +24,36 @@ accounts:
 
 mongo:
 
-  # connection string for messages database
+  # connection string for main messages database
   url: "mongodb://127.0.0.1:27017/wildduck"
 
-  # database name for the users db
-  users: "wildduck"
-  # database name for the attachments db
-  gridfs: "wildduck"
+  ## database name or connection string for the users db
+  #users: "users"
+
+  ## database name or connection string for the attachments db
+  #gridfs: "attachments"
+
+  ## database name or connection string for the outbound queue
+  #sender: "zone-mta"
+
+sender:
+  # Push messages to ZoneMTA queue for delivery
+  # if `false` then no messages are sent
+  enabled: true
+
+  # which ZoneMTA queue to use by default. This mostly affects forwarded messages
+  zone: "default"
+
+  # Collection name for GridFS storage
+  gfs: "mail"
+
+  # Collection name for the queue
+  # see [dbs].sender option for choosing correct database to use for ZoneMTA queues
+  # by default the main wildduck database is used
+  collection: "zone-queue"
 
 srs:
+  # must be shared with ZoneMTA SRS config, otherwise messages sent from ZoneMTA are not recognized by Haraka
   secret: "secret value"
 
 attachments:
@@ -58,3 +63,47 @@ attachments:
 
 log:
   authlogExpireDays: 30
+
+limits:
+  windowSize: 3600000 # 1 hour
+  rcpt: 150 # allowed messages for the same recipient during window size
+
+spamHeaders:
+  # If this header exists and starts with "yes" then the message is treated as spam
+  # This is SpamAssassin header.
+  - key: "X-Spam-Status"
+    value: "^yes"
+    target: "\\Junk"
+
+  # If this header exists and starts with "yes" then the message is treated as spam
+  # This is Rspamd header. For the same with SpamAssassin use "X-Spam-Status"
+  - key: "X-Rspamd-Spam"
+    value: "^yes"
+    target: "\\Junk"
+
+  # Treat as spam if message has header with 6 or more plus signs:
+  #   X-Rspamd-Bar: ++++++
+  - key: "X-Rspamd-Bar"
+    value: "^\\+{6}"
+    target: "\\Junk"
+
+  # If this header has a value, then it contains a virus, treat as spam
+  - key: "X-Haraka-Virus"
+    value: "."
+    target: "\\Junk"
+
+# the following is only needed if you want to autocreate users when first email arrives
+accounts:
+  # if yes then autogenerate a new account for every unknown recipient
+  # in normal conditions you don't want to do this
+  createMissing: false
+
+  # default settings for the newly generated accounts
+  maxStorage: 1024 # default quota in megabytes (if not set for an user)
+  maxRecipients: 2000
+  maxForwards: 2000
+  retention: 0
+
+  # an array of allowed hostnames for new accounts
+  hosts:
+    - "*" # allow all hostnames
