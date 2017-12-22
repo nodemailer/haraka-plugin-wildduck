@@ -147,7 +147,7 @@ exports.hook_rcpt = function(next, connection, params) {
     if (/^SRS\d+=/.test(address)) {
         let reversed = false;
         try {
-            reversed = plugin.srsRewriter.reverse(address);
+            reversed = plugin.srsRewriter.reverse(address.substr(0, address.indexOf('@')));
             let toDomain = punycode.toASCII(
                 (reversed[1] || '')
                     .toString()
