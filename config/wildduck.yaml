@@ -34,7 +34,7 @@ mongo:
   #gridfs: "attachments"
 
   ## database name or connection string for the outbound queue
-  #sender: "zone-mta"
+  sender: "zone-mta"
 
 sender:
   # Push messages to ZoneMTA queue for delivery
