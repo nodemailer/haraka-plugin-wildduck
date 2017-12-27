@@ -234,6 +234,116 @@ exports.hook_rcpt = function(next, connection, params) {
         });
     };
 
+    let checkForwardingAddress = () => {
+        plugin.db.users.collection('addresses').findOne(
+            {
+                addrview: address.substr(0, address.indexOf('@')).replace(/\./g, '') + address.substr(address.indexOf('@'))
+            },
+            (err, addressData) => {
+                if (err) {
+                    err.code = 'InternalDatabaseError';
+                    return next(err);
+                }
+                if (!addressData || !addressData.targets) {
+                    if (plugin.cfg.accounts && plugin.cfg.accounts.createMissing) {
+                        return createAccount();
+                    }
+                    return next(DENY, DSN.no_such_user());
+                }
+
+                let pos = 0;
+                let processTarget = () => {
+                    if (pos >= addressData.targets.length) {
+                        return next(OK);
+                    }
+
+                    let target = addressData.targets[pos++];
+
+                    if (target.type === 'relay') {
+                        // relay is not rate limited
+                        target.recipient = rcpt.address();
+                        connection.transaction.notes.targets.forward.set(target.value, target);
+                        return setImmediate(processTarget);
+                    }
+
+                    if (target.type === 'http' || (target.type === 'mail' && !target.user)) {
+                        // rate limited targets
+                        return plugin.rateLimit(connection, 'rcpt', target.id.toString(), (err, success) => {
+                            if (err) {
+                                return next(err);
+                            }
+
+                            if (!success) {
+                                return next(DENYSOFT, DSN.rcpt_too_fast());
+                            }
+
+                            if (target.type !== 'mail') {
+                                target.recipient = rcpt.address();
+                            }
+
+                            connection.transaction.notes.targets.forward.set(target.value, target);
+                            return setImmediate(processTarget);
+                        });
+                    }
+
+                    if (target.type !== 'mail') {
+                        // no idea what to do here, some new feature probably
+                        return setImmediate(processTarget);
+                    }
+
+                    // rate limited targets
+                    return plugin.rateLimit(connection, 'rcpt', target.user.toString(), (err, success) => {
+                        if (err) {
+                            return next(err);
+                        }
+
+                        if (!success) {
+                            return next(DENYSOFT, DSN.rcpt_too_fast());
+                        }
+
+                        // we have a target user, so we need to resolve user data
+                        plugin.db.users.collection('users').findOne(
+                            { _id: target.user },
+                            {
+                                name: true,
+                                forwards: true,
+                                forward: true,
+                                targetUrl: true,
+                                autoreply: true,
+                                encryptMessages: true,
+                                encryptForwarded: true,
+                                pubKey: true
+                            },
+                            (err, userData) => {
+                                if (err) {
+                                    err.code = 'InternalDatabaseError';
+                                    return next(err);
+                                }
+
+                                if (!userData || userData.disabled) {
+                                    return setImmediate(processTarget);
+                                }
+
+                                // max quota for the user
+                                let quota = userData.quota || Number(plugin.cfg.accounts.maxStorage || 0) * 1024 * 1024;
+
+                                if (userData.storageUsed && quota <= userData.storageUsed) {
+                                    // can not deliver mail to this user, over quota
+                                    return setImmediate(processTarget);
+                                }
+
+                                connection.transaction.notes.targets.users.set(userData._id.toString(), { user: userData, recipient: rcpt.address() });
+                                setImmediate(processTarget);
+                            }
+                        );
+                    });
+                };
+
+                setImmediate(processTarget);
+            }
+        );
+    };
+
     plugin.db.userHandler.get(
         address,
         {
@@ -252,10 +362,7 @@ exports.hook_rcpt = function(next, connection, params) {
             }
 
             if (!userData) {
-                if (plugin.cfg.accounts && plugin.cfg.accounts.createMissing) {
-                    return createAccount();
-                }
-                return next(DENY, DSN.no_such_user());
+                return checkForwardingAddress();
             }
 
             if (userData.disabled) {
