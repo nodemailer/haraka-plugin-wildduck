@@ -251,54 +251,46 @@ exports.hook_rcpt = function(next, connection, params) {
                     return next(DENY, DSN.no_such_user());
                 }
 
-                let pos = 0;
-                let processTarget = () => {
-                    if (pos >= addressData.targets.length) {
-                        return next(OK);
+                plugin.rateLimit(connection, 'rcpt', addressData._id.toString(), (err, success) => {
+                    if (err) {
+                        return next(err);
                     }
 
-                    let target = addressData.targets[pos++];
-
-                    if (target.type === 'relay') {
-                        // relay is not rate limited
-                        target.recipient = rcpt.address();
-                        connection.transaction.notes.targets.forward.set(target.value, target);
-                        return setImmediate(processTarget);
+                    if (!success) {
+                        return next(DENYSOFT, DSN.rcpt_too_fast());
                     }
 
-                    if (target.type === 'http' || (target.type === 'mail' && !target.user)) {
-                        // rate limited targets
-                        return plugin.rateLimit(connection, 'rcpt', target.id.toString(), (err, success) => {
-                            if (err) {
-                                return next(err);
-                            }
+                    let pos = 0;
+                    let processTarget = () => {
+                        if (pos >= addressData.targets.length) {
+                            return next(OK);
+                        }
 
-                            if (!success) {
-                                return next(DENYSOFT, DSN.rcpt_too_fast());
-                            }
+                        let target = addressData.targets[pos++];
 
+                        if (target.type === 'relay') {
+                            // relay is not rate limited
+                            target.recipient = rcpt.address();
+                            connection.transaction.notes.targets.forward.set(target.value, target);
+                            return setImmediate(processTarget);
+                        }
+
+                        if (target.type === 'http' || (target.type === 'mail' && !target.user)) {
                             if (target.type !== 'mail') {
                                 target.recipient = rcpt.address();
                             }
 
                             connection.transaction.notes.targets.forward.set(target.value, target);
                             return setImmediate(processTarget);
-                        });
-                    }
-
-                    if (target.type !== 'mail') {
-                        // no idea what to do here, some new feature probably
-                        return setImmediate(processTarget);
-                    }
-
-                    // rate limited targets
-                    return plugin.rateLimit(connection, 'rcpt', target.user.toString(), (err, success) => {
-                        if (err) {
-                            return next(err);
                         }
 
-                        if (!success) {
-                            return next(DENYSOFT, DSN.rcpt_too_fast());
+                        if (target.type !== 'mail') {
+                            // no idea what to do here, some new feature probably
+                            return setImmediate(processTarget);
+                        }
+
+                        if (connection.transaction.notes.targets.users.has(target.user.toString())) {
+                            return setImmediate(processTarget);
                         }
 
                         // we have a target user, so we need to resolve user data
@@ -336,10 +328,10 @@ exports.hook_rcpt = function(next, connection, params) {
                                 setImmediate(processTarget);
                             }
                         );
-                    });
-                };
+                    };
 
-                setImmediate(processTarget);
+                    setImmediate(processTarget);
+                });
             }
         );
     };
