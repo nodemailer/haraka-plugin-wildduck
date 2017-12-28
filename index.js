@@ -235,174 +235,176 @@ exports.hook_rcpt = function(next, connection, params) {
         });
     };
 
-    let checkForwardingAddress = () => {
-        plugin.db.users.collection('addresses').findOne(
-            {
-                addrview: address.substr(0, address.indexOf('@')).replace(/\./g, '') + address.substr(address.indexOf('@'))
-            },
-            (err, addressData) => {
+    let handleForwardingAddress = addressData => {
+        plugin.ttlcounter(
+            'wdf:' + addressData._id.toString(),
+            addressData.targets.length,
+            addressData.forwards || consts.MAX_FORWARDS,
+            false,
+            (err, result) => {
                 if (err) {
-                    err.code = 'InternalDatabaseError';
+                    // failed checks
+                    return next(err);
+                } else if (!result.success) {
+                    connection.logdebug(
+                        plugin,
+                        'Rate limit target=' +
+                            addressData.address +
+                            ' key=' +
+                            addressData._id +
+                            ' limit=' +
+                            addressData.forwards +
+                            ' value=' +
+                            result.value +
+                            ' ttl=' +
+                            result.ttl
+                    );
+                    return next(DENYSOFT, DSN.rcpt_too_fast());
+                }
+
+                let pos = 0;
+                let processTarget = () => {
+                    if (pos >= addressData.targets.length) {
+                        return next(OK);
+                    }
+
+                    let target = addressData.targets[pos++];
+
+                    if (target.type === 'relay') {
+                        // relay is not rate limited
+                        target.recipient = rcpt.address();
+                        connection.transaction.notes.targets.forward.set(target.value, target);
+                        return setImmediate(processTarget);
+                    }
+
+                    if (target.type === 'http' || (target.type === 'mail' && !target.user)) {
+                        if (target.type !== 'mail') {
+                            target.recipient = rcpt.address();
+                        }
+
+                        connection.transaction.notes.targets.forward.set(target.value, target);
+                        return setImmediate(processTarget);
+                    }
+
+                    if (target.type !== 'mail') {
+                        // no idea what to do here, some new feature probably
+                        return setImmediate(processTarget);
+                    }
+
+                    if (connection.transaction.notes.targets.users.has(target.user.toString())) {
+                        return setImmediate(processTarget);
+                    }
+
+                    // we have a target user, so we need to resolve user data
+                    plugin.db.users.collection('users').findOne(
+                        { _id: target.user },
+                        {
+                            name: true,
+                            forwards: true,
+                            forward: true,
+                            targetUrl: true,
+                            autoreply: true,
+                            encryptMessages: true,
+                            encryptForwarded: true,
+                            pubKey: true
+                        },
+                        (err, userData) => {
+                            if (err) {
+                                err.code = 'InternalDatabaseError';
+                                return next(err);
+                            }
+
+                            if (!userData || userData.disabled) {
+                                return setImmediate(processTarget);
+                            }
+
+                            // max quota for the user
+                            let quota = userData.quota || Number(plugin.cfg.accounts.maxStorage || 0) * 1024 * 1024;
+
+                            if (userData.storageUsed && quota <= userData.storageUsed) {
+                                // can not deliver mail to this user, over quota
+                                return setImmediate(processTarget);
+                            }
+
+                            connection.transaction.notes.targets.users.set(userData._id.toString(), { user: userData, recipient: rcpt.address() });
+                            setImmediate(processTarget);
+                        }
+                    );
+                };
+
+                setImmediate(processTarget);
+            }
+        );
+    };
+
+    plugin.db.userHandler.resolveAddress(address, { wildcard: true }, (err, addressData) => {
+        if (err) {
+            return next(err);
+        }
+
+        if (addressData && addressData.targets) {
+            return handleForwardingAddress();
+        }
+
+        if (!addressData || !addressData.user) {
+            if (plugin.cfg.accounts && plugin.cfg.accounts.createMissing) {
+                return createAccount();
+            }
+            return next(DENY, DSN.no_such_user());
+        }
+
+        plugin.db.userHandler.get(
+            addressData.user,
+            {
+                name: true,
+                forwards: true,
+                forward: true,
+                targetUrl: true,
+                autoreply: true,
+                encryptMessages: true,
+                encryptForwarded: true,
+                pubKey: true
+            },
+            (err, userData) => {
+                if (err) {
                     return next(err);
                 }
-                if (!addressData || !addressData.targets) {
+
+                if (!userData) {
                     if (plugin.cfg.accounts && plugin.cfg.accounts.createMissing) {
                         return createAccount();
                     }
                     return next(DENY, DSN.no_such_user());
                 }
 
-                plugin.ttlcounter(
-                    'wdf:' + addressData._id.toString(),
-                    addressData.targets.length,
-                    addressData.forwards || consts.MAX_FORWARDS,
-                    false,
-                    (err, result) => {
-                        if (err) {
-                            // failed checks
-                            return next(err);
-                        } else if (!result.success) {
-                            connection.logdebug(
-                                plugin,
-                                'Rate limit target=' +
-                                    addressData.address +
-                                    ' key=' +
-                                    addressData._id +
-                                    ' limit=' +
-                                    addressData.forwards +
-                                    ' value=' +
-                                    result.value +
-                                    ' ttl=' +
-                                    result.ttl
-                            );
-                            return next(DENYSOFT, DSN.rcpt_too_fast());
-                        }
+                if (userData.disabled) {
+                    // user is disabled for whatever reason
+                    return next(DENY, DSN.mbox_disabled());
+                }
 
-                        let pos = 0;
-                        let processTarget = () => {
-                            if (pos >= addressData.targets.length) {
-                                return next(OK);
-                            }
+                // max quota for the user
+                let quota = userData.quota || Number(plugin.cfg.accounts.maxStorage || 0) * 1024 * 1024;
 
-                            let target = addressData.targets[pos++];
+                if (userData.storageUsed && quota <= userData.storageUsed) {
+                    // can not deliver mail to this user, over quota
+                    return next(DENY, DSN.mbox_full());
+                }
 
-                            if (target.type === 'relay') {
-                                // relay is not rate limited
-                                target.recipient = rcpt.address();
-                                connection.transaction.notes.targets.forward.set(target.value, target);
-                                return setImmediate(processTarget);
-                            }
-
-                            if (target.type === 'http' || (target.type === 'mail' && !target.user)) {
-                                if (target.type !== 'mail') {
-                                    target.recipient = rcpt.address();
-                                }
-
-                                connection.transaction.notes.targets.forward.set(target.value, target);
-                                return setImmediate(processTarget);
-                            }
-
-                            if (target.type !== 'mail') {
-                                // no idea what to do here, some new feature probably
-                                return setImmediate(processTarget);
-                            }
-
-                            if (connection.transaction.notes.targets.users.has(target.user.toString())) {
-                                return setImmediate(processTarget);
-                            }
-
-                            // we have a target user, so we need to resolve user data
-                            plugin.db.users.collection('users').findOne(
-                                { _id: target.user },
-                                {
-                                    name: true,
-                                    forwards: true,
-                                    forward: true,
-                                    targetUrl: true,
-                                    autoreply: true,
-                                    encryptMessages: true,
-                                    encryptForwarded: true,
-                                    pubKey: true
-                                },
-                                (err, userData) => {
-                                    if (err) {
-                                        err.code = 'InternalDatabaseError';
-                                        return next(err);
-                                    }
-
-                                    if (!userData || userData.disabled) {
-                                        return setImmediate(processTarget);
-                                    }
-
-                                    // max quota for the user
-                                    let quota = userData.quota || Number(plugin.cfg.accounts.maxStorage || 0) * 1024 * 1024;
-
-                                    if (userData.storageUsed && quota <= userData.storageUsed) {
-                                        // can not deliver mail to this user, over quota
-                                        return setImmediate(processTarget);
-                                    }
-
-                                    connection.transaction.notes.targets.users.set(userData._id.toString(), { user: userData, recipient: rcpt.address() });
-                                    setImmediate(processTarget);
-                                }
-                            );
-                        };
-
-                        setImmediate(processTarget);
+                return plugin.rateLimit(connection, 'rcpt', userData._id.toString(), (err, success) => {
+                    if (err) {
+                        return next(err);
                     }
-                );
+
+                    if (!success) {
+                        return next(DENYSOFT, DSN.rcpt_too_fast());
+                    }
+
+                    connection.transaction.notes.targets.users.set(userData._id.toString(), { user: userData, recipient: rcpt.address() });
+                    return next(OK);
+                });
             }
         );
-    };
-
-    plugin.db.userHandler.get(
-        address,
-        {
-            name: true,
-            forwards: true,
-            forward: true,
-            targetUrl: true,
-            autoreply: true,
-            encryptMessages: true,
-            encryptForwarded: true,
-            pubKey: true
-        },
-        (err, userData) => {
-            if (err) {
-                return next(err);
-            }
-
-            if (!userData) {
-                return checkForwardingAddress();
-            }
-
-            if (userData.disabled) {
-                // user is disabled for whatever reason
-                return next(DENY, DSN.mbox_disabled());
-            }
-
-            // max quota for the user
-            let quota = userData.quota || Number(plugin.cfg.accounts.maxStorage || 0) * 1024 * 1024;
-
-            if (userData.storageUsed && quota <= userData.storageUsed) {
-                // can not deliver mail to this user, over quota
-                return next(DENY, DSN.mbox_full());
-            }
-
-            return plugin.rateLimit(connection, 'rcpt', userData._id.toString(), (err, success) => {
-                if (err) {
-                    return next(err);
-                }
-
-                if (!success) {
-                    return next(DENYSOFT, DSN.rcpt_too_fast());
-                }
-
-                connection.transaction.notes.targets.users.set(userData._id.toString(), { user: userData, recipient: rcpt.address() });
-                return next(OK);
-            });
-        }
-    );
+    });
 };
 
 exports.hook_queue = function(next, connection) {

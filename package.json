@@ -37,6 +37,6 @@
         "ioredis": "3.2.2",
         "mongodb": "3.0.1",
         "srs.js": "0.1.0",
-        "wildduck": "1.0.101"
+        "wildduck": "1.0.102"
     }
 }
