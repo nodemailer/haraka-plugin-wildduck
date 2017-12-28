@@ -343,7 +343,7 @@ exports.hook_rcpt = function(next, connection, params) {
         }
 
         if (addressData && addressData.targets) {
-            return handleForwardingAddress();
+            return handleForwardingAddress(addressData);
         }
 
         if (!addressData || !addressData.user) {
