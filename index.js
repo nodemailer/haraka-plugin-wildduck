@@ -18,6 +18,7 @@ const tools = require('wildduck/lib/tools');
 const StreamCollect = require('./lib/stream-collect');
 const Maildropper = require('wildduck/lib/maildropper');
 const FilterHandler = require('wildduck/lib/filter-handler');
+const autoreply = require('wildduck/lib/autoreply');
 const consts = require('wildduck/lib/consts');
 
 DSN.rcpt_too_fast = () =>
@@ -118,7 +119,8 @@ exports.hook_mail = function(next, connection, params) {
     connection.transaction.notes.targets = {
         users: new Map(),
         forward: new Map(),
-        recipients: new Set()
+        recipients: new Set(),
+        autoreplies: new Map()
     };
 
     connection.transaction.notes.transmissionType = []
@@ -262,6 +264,10 @@ exports.hook_rcpt = function(next, connection, params) {
                     return next(DENYSOFT, DSN.rcpt_too_fast());
                 }
 
+                if (addressData.autoreply) {
+                    connection.transaction.notes.targets.autoreplies.set(addressData.addrview, addressData);
+                }
+
                 let pos = 0;
                 let processTarget = () => {
                     if (pos >= addressData.targets.length) {
@@ -299,6 +305,7 @@ exports.hook_rcpt = function(next, connection, params) {
                     plugin.db.users.collection('users').findOne(
                         { _id: target.user },
                         {
+                            // extra fields are needed later in the filtering step
                             name: true,
                             forwards: true,
                             forward: true,
@@ -337,74 +344,79 @@ exports.hook_rcpt = function(next, connection, params) {
         );
     };
 
-    plugin.db.userHandler.resolveAddress(address, { wildcard: true }, (err, addressData) => {
-        if (err) {
-            return next(err);
-        }
-
-        if (addressData && addressData.targets) {
-            return handleForwardingAddress(addressData);
-        }
-
-        if (!addressData || !addressData.user) {
-            if (plugin.cfg.accounts && plugin.cfg.accounts.createMissing) {
-                return createAccount();
+    plugin.db.userHandler.resolveAddress(
+        address,
+        { wildcard: true, fields: { name: true, address: true, addrview: true, autoreply: true } },
+        (err, addressData) => {
+            if (err) {
+                return next(err);
             }
-            return next(DENY, DSN.no_such_user());
-        }
 
-        plugin.db.userHandler.get(
-            addressData.user,
-            {
-                name: true,
-                forwards: true,
-                forward: true,
-                targetUrl: true,
-                autoreply: true,
-                encryptMessages: true,
-                encryptForwarded: true,
-                pubKey: true
-            },
-            (err, userData) => {
-                if (err) {
-                    return next(err);
+            if (addressData && addressData.targets) {
+                return handleForwardingAddress(addressData);
+            }
+
+            if (!addressData || !addressData.user) {
+                if (plugin.cfg.accounts && plugin.cfg.accounts.createMissing) {
+                    return createAccount();
                 }
+                return next(DENY, DSN.no_such_user());
+            }
 
-                if (!userData) {
-                    if (plugin.cfg.accounts && plugin.cfg.accounts.createMissing) {
-                        return createAccount();
-                    }
-                    return next(DENY, DSN.no_such_user());
-                }
-
-                if (userData.disabled) {
-                    // user is disabled for whatever reason
-                    return next(DENY, DSN.mbox_disabled());
-                }
-
-                // max quota for the user
-                let quota = userData.quota || Number(plugin.cfg.accounts.maxStorage || 0) * 1024 * 1024;
-
-                if (userData.storageUsed && quota <= userData.storageUsed) {
-                    // can not deliver mail to this user, over quota
-                    return next(DENY, DSN.mbox_full());
-                }
-
-                return plugin.rateLimit(connection, 'rcpt', userData._id.toString(), (err, success) => {
+            plugin.db.userHandler.get(
+                addressData.user,
+                {
+                    // extra fields are needed later in the filtering step
+                    name: true,
+                    forwards: true,
+                    forward: true,
+                    targetUrl: true,
+                    autoreply: true,
+                    encryptMessages: true,
+                    encryptForwarded: true,
+                    pubKey: true
+                },
+                (err, userData) => {
                     if (err) {
                         return next(err);
                     }
 
-                    if (!success) {
-                        return next(DENYSOFT, DSN.rcpt_too_fast());
+                    if (!userData) {
+                        if (plugin.cfg.accounts && plugin.cfg.accounts.createMissing) {
+                            return createAccount();
+                        }
+                        return next(DENY, DSN.no_such_user());
                     }
 
-                    connection.transaction.notes.targets.users.set(userData._id.toString(), { user: userData, recipient: rcpt.address() });
-                    return next(OK);
-                });
-            }
-        );
-    });
+                    if (userData.disabled) {
+                        // user is disabled for whatever reason
+                        return next(DENY, DSN.mbox_disabled());
+                    }
+
+                    // max quota for the user
+                    let quota = userData.quota || Number(plugin.cfg.accounts.maxStorage || 0) * 1024 * 1024;
+
+                    if (userData.storageUsed && quota <= userData.storageUsed) {
+                        // can not deliver mail to this user, over quota
+                        return next(DENY, DSN.mbox_full());
+                    }
+
+                    return plugin.rateLimit(connection, 'rcpt', userData._id.toString(), (err, success) => {
+                        if (err) {
+                            return next(err);
+                        }
+
+                        if (!success) {
+                            return next(DENYSOFT, DSN.rcpt_too_fast());
+                        }
+
+                        connection.transaction.notes.targets.users.set(userData._id.toString(), { user: userData, recipient: rcpt.address() });
+                        return next(OK);
+                    });
+                }
+            );
+        }
+    );
 };
 
 exports.hook_queue = function(next, connection) {
@@ -432,13 +444,14 @@ exports.hook_queue = function(next, connection) {
             return collectData(done);
         }
 
-        let targets = connection.transaction.notes.targets.forward.size
-            ? Array.from(connection.transaction.notes.targets.forward).map(row => ({
-                type: row[1].type,
-                value: row[1].value,
-                recipient: row[1].recipient
-            }))
-            : false;
+        let targets =
+            (connection.transaction.notes.targets.forward.size &&
+                Array.from(connection.transaction.notes.targets.forward).map(row => ({
+                    type: row[1].type,
+                    value: row[1].value,
+                    recipient: row[1].recipient
+                }))) ||
+            false;
 
         let mail = {
             parentId: connection.transaction.notes.id,
@@ -488,63 +501,116 @@ exports.hook_queue = function(next, connection) {
         }
     };
 
-    // try to forward the message. If forwarding is not needed then continues immediatelly
-    forwardMessage(() => {
-        let prepared = false;
+    let sendAutoreplies = done => {
+        if (!connection.transaction.notes.targets.autoreplies.size) {
+            return done();
+        }
+        // TODO: send autoreply messages
 
-        let users = Array.from(connection.transaction.notes.targets.users).map(e => e[1]);
-        let stored = 0;
-
-        let storeNext = () => {
-            if (stored >= users.length) {
-                return next(OK, 'Message processed');
+        let curtime = new Date();
+        let pos = 0;
+        let targets = Array.from(connection.transaction.notes.targets.autoreplies);
+        let processNext = () => {
+            if (pos >= targets.length) {
+                return done();
             }
 
-            let rcptData = users[stored++];
-            let recipient = rcptData.recipient;
-            let userData = rcptData.user;
+            let target = targets[pos++];
+            let addressData = target[1];
 
-            plugin.filterHandler.process(
+            let autoreplyData = addressData.autoreply;
+            autoreplyData._id = autoreplyData._id || addressData._id;
+
+            if (!autoreplyData || !autoreplyData.status) {
+                return setImmediate(processNext);
+            }
+
+            if (autoreplyData.start && autoreplyData.start > curtime) {
+                return setImmediate(processNext);
+            }
+
+            if (autoreplyData.end && autoreplyData.end < curtime) {
+                return setImmediate(processNext);
+            }
+
+            autoreply(
                 {
-                    mimeTree: prepared && prepared.mimeTree,
-                    maildata: prepared && prepared.maildata,
-                    user: userData,
+                    db: plugin.db,
+                    queueId: connection.transaction.uuid,
+                    maildrop: plugin.maildrop,
                     sender: connection.transaction.notes.sender,
-                    recipient,
+                    recipient: addressData.address,
                     chunks: collector.chunks,
                     chunklen: collector.chunklen,
-                    meta: {
-                        transactionId: connection.transaction.uuid,
-                        source: 'MX',
-                        from: connection.transaction.notes.sender,
-                        to: [recipient],
-                        origin: connection.remote_ip,
-                        transhost: connection.hello.host,
-                        transtype: connection.transaction.notes.transmissionType,
-                        time: new Date()
-                    }
+                    messageHandler: plugin.db.messageHandler
                 },
-                (err, response, preparedResponse) => {
-                    if (err) {
-                        // we can fail the message even if some recipients were already processed
-                        // as redelivery would not be a problem - duplicate deliveries are ignored (filters are rerun though).
-                        return next(DENYSOFT, 'Failed to Queue message');
-                    }
-
-                    if (response && response.error) {
-                        return next(response.error.code === 'DroppedByPolicy' ? DENY : DENYSOFT, response.error.message);
-                    }
-
-                    if (!prepared && preparedResponse) {
-                        // reuse parsed message structure
-                        prepared = preparedResponse;
-                    }
-
-                    setImmediate(storeNext);
-                }
+                autoreplyData,
+                processNext
             );
         };
-        storeNext();
+        processNext();
+    };
+
+    // try to forward the message. If forwarding is not needed then continues immediatelly
+    forwardMessage(() => {
+        // send autoreplies to forwarded addresses (if needed)
+        sendAutoreplies(() => {
+            let prepared = false;
+
+            let users = Array.from(connection.transaction.notes.targets.users).map(e => e[1]);
+            let stored = 0;
+
+            let storeNext = () => {
+                if (stored >= users.length) {
+                    return next(OK, 'Message processed');
+                }
+
+                let rcptData = users[stored++];
+                let recipient = rcptData.recipient;
+                let userData = rcptData.user;
+
+                plugin.filterHandler.process(
+                    {
+                        mimeTree: prepared && prepared.mimeTree,
+                        maildata: prepared && prepared.maildata,
+                        user: userData,
+                        sender: connection.transaction.notes.sender,
+                        recipient,
+                        chunks: collector.chunks,
+                        chunklen: collector.chunklen,
+                        meta: {
+                            transactionId: connection.transaction.uuid,
+                            source: 'MX',
+                            from: connection.transaction.notes.sender,
+                            to: [recipient],
+                            origin: connection.remote_ip,
+                            transhost: connection.hello.host,
+                            transtype: connection.transaction.notes.transmissionType,
+                            time: new Date()
+                        }
+                    },
+                    (err, response, preparedResponse) => {
+                        if (err) {
+                            // we can fail the message even if some recipients were already processed
+                            // as redelivery would not be a problem - duplicate deliveries are ignored (filters are rerun though).
+                            return next(DENYSOFT, 'Failed to Queue message');
+                        }
+
+                        if (response && response.error) {
+                            return next(response.error.code === 'DroppedByPolicy' ? DENY : DENYSOFT, response.error.message);
+                        }
+
+                        if (!prepared && preparedResponse) {
+                            // reuse parsed message structure
+                            prepared = preparedResponse;
+                        }
+
+                        setImmediate(storeNext);
+                    }
+                );
+            };
+            storeNext();
+        });
     });
 };
 
