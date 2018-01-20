@@ -308,8 +308,7 @@ exports.hook_rcpt = function(next, connection, params) {
                             // extra fields are needed later in the filtering step
                             name: true,
                             forwards: true,
-                            forward: true,
-                            targetUrl: true,
+                            targets: true,
                             autoreply: true,
                             encryptMessages: true,
                             encryptForwarded: true,
@@ -369,8 +368,7 @@ exports.hook_rcpt = function(next, connection, params) {
                     // extra fields are needed later in the filtering step
                     name: true,
                     forwards: true,
-                    forward: true,
-                    targetUrl: true,
+                    targets: true,
                     autoreply: true,
                     encryptMessages: true,
                     encryptForwarded: true,
