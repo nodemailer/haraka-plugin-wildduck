@@ -25,10 +25,10 @@
         "grunt-eslint": "^20.1.0"
     },
     "dependencies": {
-        "hi-base32": "0.3.0",
+        "hi-base32": "0.4.0",
         "ioredis": "3.2.2",
         "mongodb": "3.0.1",
         "srs.js": "0.1.0",
-        "wildduck": "1.0.108"
+        "wildduck": "1.0.109"
     }
 }
