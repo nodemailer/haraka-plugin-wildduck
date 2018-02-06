@@ -91,19 +91,3 @@ spamHeaders:
   - key: "X-Haraka-Virus"
     value: "."
     target: "\\Junk"
-
-# the following is only needed if you want to autocreate users when first email arrives
-accounts:
-  # if yes then autogenerate a new account for every unknown recipient
-  # in normal conditions you don't want to do this
-  createMissing: false
-
-  # default settings for the newly generated accounts
-  maxStorage: 1024 # default quota in megabytes (if not set for an user)
-  maxRecipients: 2000
-  maxForwards: 2000
-  retention: 0
-
-  # an array of allowed hostnames for new accounts
-  hosts:
-    - "*" # allow all hostnames
