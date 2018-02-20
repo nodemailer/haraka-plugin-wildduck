@@ -26,9 +26,9 @@
     },
     "homepage": "https://github.com/nodemailer/haraka-plugin-wildduck#readme",
     "devDependencies": {
-        "eslint": "^4.17.0",
+        "eslint": "^4.18.0",
         "eslint-config-nodemailer": "^1.2.0",
-        "grunt": "^1.0.1",
+        "grunt": "^1.0.2",
         "grunt-cli": "^1.2.0",
         "grunt-eslint": "^20.1.0"
     },
@@ -36,6 +36,6 @@
         "ioredis": "3.2.2",
         "mongodb": "3.0.2",
         "srs.js": "0.1.0",
-        "wildduck": "1.0.114"
+        "wildduck": "1.0.115"
     }
 }
