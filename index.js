@@ -146,6 +146,7 @@ exports.hook_rcpt = function(next, connection, params) {
     plugin.logdebug('Checking validity of ' + address);
 
     if (/^SRS\d+=/.test(address)) {
+        plugin.logdebug(address + ' seesm to be SRS');
         let reversed = false;
         try {
             reversed = plugin.srsRewriter.reverse(address.substr(0, address.indexOf('@')));
@@ -185,6 +186,7 @@ exports.hook_rcpt = function(next, connection, params) {
     }
 
     let handleForwardingAddress = addressData => {
+        plugin.logdebug('Checking forwarding address');
         plugin.ttlcounter(
             'wdf:' + addressData._id.toString(),
             addressData.targets.length,
@@ -240,6 +242,7 @@ exports.hook_rcpt = function(next, connection, params) {
                     }
 
                     if (target.type !== 'mail') {
+                        plugin.logdebug('Unknown target type ' + JSON.stringify(target));
                         // no idea what to do here, some new feature probably
                         return setImmediate(processTarget);
                     }
@@ -303,6 +306,7 @@ exports.hook_rcpt = function(next, connection, params) {
             }
 
             if (!addressData || !addressData.user) {
+                plugin.logdebug('No such user');
                 return next(DENY, DSN.no_such_user());
             }
 
@@ -348,6 +352,8 @@ exports.hook_rcpt = function(next, connection, params) {
                         if (!success) {
                             return next(DENYSOFT, DSN.rcpt_too_fast());
                         }
+
+                        plugin.logdebug('Added recipient ' + rcpt.address());
 
                         connection.transaction.notes.targets.users.set(userData._id.toString(), { user: userData, recipient: rcpt.address() });
                         return next(OK);
@@ -507,6 +513,8 @@ exports.hook_queue = function(next, connection) {
                 let rcptData = users[stored++];
                 let recipient = rcptData.recipient;
                 let userData = rcptData.user;
+
+                plugin.logdebug('Filtering message for ' + recipient);
 
                 plugin.filterHandler.process(
                     {
