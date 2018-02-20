@@ -537,6 +537,8 @@ exports.hook_queue = function(next, connection) {
                         }
                     },
                     (err, response, preparedResponse) => {
+                        plugin.logdebug('Filtering response ' + JSON.stringify(response));
+
                         if (err) {
                             // we can fail the message even if some recipients were already processed
                             // as redelivery would not be a problem - duplicate deliveries are ignored (filters are rerun though).
