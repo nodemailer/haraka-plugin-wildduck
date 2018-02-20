@@ -146,7 +146,7 @@ exports.hook_rcpt = function(next, connection, params) {
     plugin.logdebug('Checking validity of ' + address);
 
     if (/^SRS\d+=/.test(address)) {
-        plugin.logdebug(address + ' seesm to be SRS');
+        plugin.logdebug(address + ' seems to be SRS');
         let reversed = false;
         try {
             reversed = plugin.srsRewriter.reverse(address.substr(0, address.indexOf('@')));
@@ -186,7 +186,7 @@ exports.hook_rcpt = function(next, connection, params) {
     }
 
     let handleForwardingAddress = addressData => {
-        plugin.logdebug('Checking forwarding address');
+        plugin.logdebug('Checking forwarding address ' + addressData._id);
         plugin.ttlcounter(
             'wdf:' + addressData._id.toString(),
             addressData.targets.length,
@@ -242,7 +242,6 @@ exports.hook_rcpt = function(next, connection, params) {
                     }
 
                     if (target.type !== 'mail') {
-                        plugin.logdebug('Unknown target type ' + JSON.stringify(target));
                         // no idea what to do here, some new feature probably
                         return setImmediate(processTarget);
                     }
@@ -306,7 +305,7 @@ exports.hook_rcpt = function(next, connection, params) {
             }
 
             if (!addressData || !addressData.user) {
-                plugin.logdebug('No such user');
+                plugin.logdebug('No such user ' + address);
                 return next(DENY, DSN.no_such_user());
             }
 
@@ -515,30 +514,6 @@ exports.hook_queue = function(next, connection) {
                 let userData = rcptData.user;
 
                 plugin.logdebug('Filtering message for ' + recipient);
-
-                plugin.logdebug(
-                    'INPUT ' +
-                        JSON.stringify({
-                            mimeTree: prepared && prepared.mimeTree,
-                            maildata: prepared && prepared.maildata,
-                            user: userData,
-                            sender: connection.transaction.notes.sender,
-                            recipient,
-                            chunks: collector.chunks,
-                            chunklen: collector.chunklen,
-                            meta: {
-                                transactionId: connection.transaction.uuid,
-                                source: 'MX',
-                                from: connection.transaction.notes.sender,
-                                to: [recipient],
-                                origin: connection.remote_ip,
-                                transhost: connection.hello.host,
-                                transtype: connection.transaction.notes.transmissionType,
-                                time: new Date()
-                            }
-                        })
-                );
-
                 plugin.filterHandler.process(
                     {
                         mimeTree: prepared && prepared.mimeTree,
@@ -560,8 +535,6 @@ exports.hook_queue = function(next, connection) {
                         }
                     },
                     (err, response, preparedResponse) => {
-                        plugin.logdebug('Filtering response ' + JSON.stringify(response) + ' ' + JSON.stringify(preparedResponse));
-
                         if (err) {
                             // we can fail the message even if some recipients were already processed
                             // as redelivery would not be a problem - duplicate deliveries are ignored (filters are rerun though).
