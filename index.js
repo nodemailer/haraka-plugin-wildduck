@@ -516,6 +516,29 @@ exports.hook_queue = function(next, connection) {
 
                 plugin.logdebug('Filtering message for ' + recipient);
 
+                plugin.logdebug(
+                    'INPUT ' +
+                        JSON.stringify({
+                            mimeTree: prepared && prepared.mimeTree,
+                            maildata: prepared && prepared.maildata,
+                            user: userData,
+                            sender: connection.transaction.notes.sender,
+                            recipient,
+                            chunks: collector.chunks,
+                            chunklen: collector.chunklen,
+                            meta: {
+                                transactionId: connection.transaction.uuid,
+                                source: 'MX',
+                                from: connection.transaction.notes.sender,
+                                to: [recipient],
+                                origin: connection.remote_ip,
+                                transhost: connection.hello.host,
+                                transtype: connection.transaction.notes.transmissionType,
+                                time: new Date()
+                            }
+                        })
+                );
+
                 plugin.filterHandler.process(
                     {
                         mimeTree: prepared && prepared.mimeTree,
