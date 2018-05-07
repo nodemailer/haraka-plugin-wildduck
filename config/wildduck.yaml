@@ -65,7 +65,7 @@ log:
   authlogExpireDays: 30
 
 limits:
-  windowSize: 3600000 # 1 hour
+  windowSize: 3600 # 1 hour
   rcpt: 150 # allowed messages for the same recipient during window size
 
 spamHeaders:

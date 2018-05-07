@@ -566,7 +566,7 @@ exports.rateLimit = function(connection, key, value, next) {
     if (!limit) {
         return next(null, true);
     }
-    let windowSize = plugin.cfg.limits[key + 'WindowSize'] || plugin.cfg.limits.windowSize || 1 * 3600 * 1000;
+    let windowSize = plugin.cfg.limits[key + 'WindowSize'] || plugin.cfg.limits.windowSize || 1 * 3600;
 
     plugin.ttlcounter('rl:' + key + ':' + value, 1, limit, windowSize, (err, result) => {
         if (err) {
