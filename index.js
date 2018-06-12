@@ -170,7 +170,7 @@ exports.hook_rcpt = function(next, connection, params) {
 
         if (reversed) {
             // accept SRS rewritten address
-            return plugin.rateLimit(connection, 'rcpt', reversed, (err, success) => {
+            return plugin.rateLimit(connection, 'rcpt', reversed, false, (err, success) => {
                 if (err) {
                     return next(err);
                 }
@@ -343,7 +343,7 @@ exports.hook_rcpt = function(next, connection, params) {
                         return next(DENY, DSN.mbox_full());
                     }
 
-                    return plugin.rateLimit(connection, 'rcpt', userData._id.toString(), (err, success) => {
+                    return plugin.rateLimit(connection, 'rcpt', userData._id.toString(), userData.receivedMax, (err, success) => {
                         if (err) {
                             return next(err);
                         }
@@ -559,13 +559,14 @@ exports.hook_queue = function(next, connection) {
     });
 };
 
-exports.rateLimit = function(connection, key, value, next) {
+exports.rateLimit = function(connection, key, value, limit, next) {
     let plugin = this;
 
-    let limit = plugin.cfg.limits[key];
+    limit = Number(limit) || plugin.cfg.limits[key];
     if (!limit) {
         return next(null, true);
     }
+
     let windowSize = plugin.cfg.limits[key + 'WindowSize'] || plugin.cfg.limits.windowSize || 1 * 3600;
 
     plugin.ttlcounter('rl:' + key + ':' + value, 1, limit, windowSize, (err, result) => {
