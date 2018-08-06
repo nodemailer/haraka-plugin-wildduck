@@ -1,7 +1,6 @@
 ---
 
 ## Connect to a master instance or Redis
-## Not needed if haraka-plugin-redis or haraka-plugin-ioredis is already present
 redis:
 
   port: 6379
