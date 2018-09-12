@@ -16,8 +16,8 @@ let enum_status_codes = [
         'Destination mailbox address ambiguous', // X.1.4
         'Destination address valid', // X.1.5
         'Destination mailbox has moved, No forwarding address', // X.1.6
-        'Bad sender\'s mailbox address syntax', // X.1.7
-        'Bad sender\'s system address' // X.1.8
+        "Bad sender's mailbox address syntax", // X.1.7
+        "Bad sender's system address" // X.1.8
     ],
     [
         // X.2.XXX Mailbox Status                   (mbox_*)

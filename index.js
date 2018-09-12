@@ -57,34 +57,38 @@ exports.open_database = function(server, next) {
         secret: plugin.cfg.srs.secret
     });
 
-    db.connect(server.notes.redis, plugin.cfg, (err, db) => {
-        if (err) {
-            return next(err);
+    db.connect(
+        server.notes.redis,
+        plugin.cfg,
+        (err, db) => {
+            if (err) {
+                return next(err);
+            }
+            plugin.db = db;
+            plugin.ttlcounter = counters(db.redis).ttlcounter;
+
+            plugin.maildrop = new Maildropper({
+                db,
+                enabled: plugin.cfg.sender.enabled,
+                zone: plugin.cfg.sender.zone,
+                collection: plugin.cfg.sender.collection,
+                gfs: plugin.cfg.sender.gfs
+            });
+
+            let spamChecks = plugin.cfg.spamHeaders && tools.prepareSpamChecks(plugin.cfg.spamHeaders);
+
+            plugin.filterHandler = new FilterHandler({
+                db,
+                sender: plugin.cfg.sender,
+                messageHandler: plugin.db.messageHandler,
+                spamChecks,
+                spamHeaderKeys: spamChecks && spamChecks.map(check => check.key)
+            });
+
+            plugin.loginfo('Database connection opened');
+            next();
         }
-        plugin.db = db;
-        plugin.ttlcounter = counters(db.redis).ttlcounter;
-
-        plugin.maildrop = new Maildropper({
-            db,
-            enabled: plugin.cfg.sender.enabled,
-            zone: plugin.cfg.sender.zone,
-            collection: plugin.cfg.sender.collection,
-            gfs: plugin.cfg.sender.gfs
-        });
-
-        let spamChecks = plugin.cfg.spamHeaders && tools.prepareSpamChecks(plugin.cfg.spamHeaders);
-
-        plugin.filterHandler = new FilterHandler({
-            db,
-            sender: plugin.cfg.sender,
-            messageHandler: plugin.db.messageHandler,
-            spamChecks,
-            spamHeaderKeys: spamChecks && spamChecks.map(check => check.key)
-        });
-
-        plugin.loginfo('Database connection opened');
-        next();
-    });
+    );
 };
 
 exports.normalize_address = function(address) {
