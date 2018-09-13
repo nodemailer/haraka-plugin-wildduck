@@ -67,6 +67,8 @@ limits:
   windowSize: 3600 # 1 hour
   rcpt: 150 # allowed messages for the same recipient during window size
 
+spamScore: 6
+
 spamHeaders:
   # If this header exists and starts with "yes" then the message is treated as spam
   # This is SpamAssassin header.

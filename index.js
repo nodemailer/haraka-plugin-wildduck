@@ -82,7 +82,8 @@ exports.open_database = function(server, next) {
                 sender: plugin.cfg.sender,
                 messageHandler: plugin.db.messageHandler,
                 spamChecks,
-                spamHeaderKeys: spamChecks && spamChecks.map(check => check.key)
+                spamHeaderKeys: spamChecks && spamChecks.map(check => check.key),
+                spamScoreValue: plugin.cfg.spamScore
             });
 
             plugin.loginfo('Database connection opened');
