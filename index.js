@@ -119,6 +119,7 @@ exports.hook_mail = function(next, connection, params) {
     connection.transaction.notes.sender = from.address();
 
     connection.transaction.notes.id = new ObjectID();
+    connection.transaction.notes.rateKeys = [];
     connection.transaction.notes.targets = {
         users: new Map(),
         forward: new Map(),
@@ -175,7 +176,9 @@ exports.hook_rcpt = function(next, connection, params) {
 
         if (reversed) {
             // accept SRS rewritten address
-            return plugin.rateLimit(connection, 'rcpt', reversed, false, (err, success) => {
+            let key = reversed;
+            let selector = 'rcpt';
+            return plugin.checkRateLimit(connection, selector, key, false, (err, success) => {
                 if (err) {
                     return next(err);
                 }
@@ -183,6 +186,9 @@ exports.hook_rcpt = function(next, connection, params) {
                 if (!success) {
                     return next(DENYSOFT, DSN.rcpt_too_fast());
                 }
+
+                // update rate limit for this address after delivery
+                connection.transaction.notes.rateKeys.push({ selector, key });
 
                 connection.transaction.notes.targets.forward.set(reversed, { type: 'mail', value: reversed });
                 return next(OK);
@@ -348,19 +354,49 @@ exports.hook_rcpt = function(next, connection, params) {
                         return next(DENY, DSN.mbox_full());
                     }
 
-                    return plugin.rateLimit(connection, 'rcpt', userData._id.toString(), userData.receivedMax, (err, success) => {
-                        if (err) {
-                            return next(err);
+                    let checkIpRateLimit = done => {
+                        if (!connection.remote.ip) {
+                            return done();
                         }
 
-                        if (!success) {
-                            return next(DENYSOFT, DSN.rcpt_too_fast());
-                        }
+                        let key = connection.remote.ip + ':' + userData._id.toString();
+                        let selector = 'rcptIp';
+                        plugin.checkRateLimit(connection, selector, key, false, (err, success) => {
+                            if (err) {
+                                return next(err);
+                            }
 
-                        plugin.logdebug('Added recipient ' + rcpt.address());
+                            if (!success) {
+                                return next(DENYSOFT, DSN.rcpt_too_fast());
+                            }
 
-                        connection.transaction.notes.targets.users.set(userData._id.toString(), { user: userData, recipient: rcpt.address() });
-                        return next(OK);
+                            // update rate limit for this address after delivery
+                            connection.transaction.notes.rateKeys.push({ selector, key });
+
+                            return done();
+                        });
+                    };
+
+                    checkIpRateLimit(() => {
+                        let key = userData._id.toString();
+                        let selector = 'rcpt';
+                        plugin.checkRateLimit(connection, selector, key, userData.receivedMax, (err, success) => {
+                            if (err) {
+                                return next(err);
+                            }
+
+                            if (!success) {
+                                return next(DENYSOFT, DSN.rcpt_too_fast());
+                            }
+
+                            plugin.logdebug('Added recipient ' + rcpt.address());
+
+                            // update rate limit for this address after delivery
+                            connection.transaction.notes.rateKeys.push({ selector, key, limit: userData.receivedMax });
+
+                            connection.transaction.notes.targets.users.set(userData._id.toString(), { user: userData, recipient: rcpt.address() });
+                            return next(OK);
+                        });
                     });
                 }
             );
@@ -500,6 +536,21 @@ exports.hook_queue = function(next, connection) {
         processNext();
     };
 
+    // update rate limit counters for all recipients
+    let updateRateLimits = done => {
+        let rateKeys = connection.transaction.notes.rateKeys || [];
+        let pos = 0;
+        let processKey = () => {
+            if (pos >= rateKeys.length) {
+                return done();
+            }
+
+            let rateKey = rateKeys[pos++];
+            plugin.updateRateLimit(connection, rateKey.selector || 'rcpt', rateKey.key, rateKey.limit, processKey);
+        };
+        processKey();
+    };
+
     // try to forward the message. If forwarding is not needed then continues immediatelly
     forwardMessage(() => {
         // send autoreplies to forwarded addresses (if needed)
@@ -511,7 +562,7 @@ exports.hook_queue = function(next, connection) {
 
             let storeNext = () => {
                 if (stored >= users.length) {
-                    return next(OK, 'Message processed');
+                    return updateRateLimits(() => next(OK, 'Message processed'));
                 }
 
                 let rcptData = users[stored++];
@@ -564,22 +615,50 @@ exports.hook_queue = function(next, connection) {
     });
 };
 
-exports.rateLimit = function(connection, key, value, limit, next) {
+// Rate limit is checked on RCPT TO
+exports.checkRateLimit = function(connection, selector, key, limit, next) {
     let plugin = this;
 
-    limit = Number(limit) || plugin.cfg.limits[key];
+    limit = Number(limit) || plugin.cfg.limits[selector];
     if (!limit) {
         return next(null, true);
     }
 
-    let windowSize = plugin.cfg.limits[key + 'WindowSize'] || plugin.cfg.limits.windowSize || 1 * 3600;
+    let windowSize = plugin.cfg.limits[selector + 'WindowSize'] || plugin.cfg.limits.windowSize || 1 * 3600;
 
-    plugin.ttlcounter('rl:' + key + ':' + value, 1, limit, windowSize, (err, result) => {
+    plugin.ttlcounter('rl:' + selector + ':' + key, 0, limit, windowSize, (err, result) => {
         if (err) {
             return next(err);
         }
 
-        connection.logdebug(plugin, 'Rate limit target=' + value + ' key=' + key + ' limit=' + limit + ' value=' + result.value + ' ttl=' + result.ttl);
+        if (!result.success) {
+            connection.logdebug(
+                plugin,
+                'Rate limit key=' + key + ' selector=' + selector + ' limit=' + limit + ' value=' + result.value + ' ttl=' + result.ttl
+            );
+        }
+
+        return next(null, result.success);
+    });
+};
+
+// Update rate limit counters on successful delivery
+exports.updateRateLimit = function(connection, selector, key, limit, next) {
+    let plugin = this;
+
+    limit = Number(limit) || plugin.cfg.limits[selector];
+    if (!limit) {
+        return next(null, true);
+    }
+
+    let windowSize = plugin.cfg.limits[selector + 'WindowSize'] || plugin.cfg.limits.windowSize || 1 * 3600;
+
+    plugin.ttlcounter('rl:' + selector + ':' + key, 1, limit, windowSize, (err, result) => {
+        if (err) {
+            return next(err);
+        }
+
+        connection.logdebug(plugin, 'Rate limit key=' + key + ' selector=' + selector + ' limit=' + limit + ' value=' + result.value + ' ttl=' + result.ttl);
 
         return next(null, result.success);
     });

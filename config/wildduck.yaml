@@ -65,7 +65,8 @@ log:
 
 limits:
   windowSize: 3600 # 1 hour
-  rcpt: 150 # allowed messages for the same recipient during window size
+  rcpt: 300 # allowed messages for the same recipient during window size
+  rcptIp: 100 # allowed messages for the same recipient from same IP during window size
 
 spamScore: 6
 

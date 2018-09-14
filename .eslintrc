@@ -1,3 +1,9 @@
 {
-    "extends": ["nodemailer", "prettier"]
+    "rules": {
+        "no-await-in-loop": 0
+    },
+    "extends": ["nodemailer", "prettier"],
+    "parserOptions": {
+        "ecmaVersion": 2017
+    }
 }
