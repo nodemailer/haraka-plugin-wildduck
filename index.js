@@ -542,10 +542,12 @@ exports.hook_queue = function(next, connection) {
         let pos = 0;
         let processKey = () => {
             if (pos >= rateKeys.length) {
+                plugin.logdebug('Rate keys processed');
                 return done();
             }
 
             let rateKey = rateKeys[pos++];
+            plugin.logdebug('Rate key. key=' + JSON.stringify(rateKey));
             plugin.updateRateLimit(connection, rateKey.selector || 'rcpt', rateKey.key, rateKey.limit, processKey);
         };
         processKey();
