@@ -29,7 +29,7 @@ DSN.rcpt_too_fast = () =>
 
 exports.register = function() {
     let plugin = this;
-    plugin.logdebug(plugin, 'Initializing rcpt_to Wild Duck plugin.');
+    plugin.logdebug('Initializing rcpt_to Wild Duck plugin.', plugin);
     plugin.load_wildduck_ini();
 
     plugin.register_hook('init_master', 'init_wildduck_shared');
@@ -86,7 +86,7 @@ exports.open_database = function(server, next) {
                 spamScoreValue: plugin.cfg.spamScore
             });
 
-            plugin.loginfo(plugin, 'Database connection opened');
+            plugin.loginfo('Database connection opened', plugin);
             next();
         }
     );
@@ -149,10 +149,10 @@ exports.hook_rcpt = function(next, connection, params) {
 
     connection.transaction.notes.targets.recipients.add(address);
 
-    plugin.logdebug(plugin, 'Checking validity of ' + address);
+    plugin.logdebug('Checking validity of ' + address, plugin, connection);
 
     if (/^SRS\d+=/.test(address)) {
-        plugin.logdebug(address + ' seems to be SRS');
+        plugin.logdebug(address + ' seems to be SRS', plugin, connection);
         let reversed = false;
         try {
             reversed = plugin.srsRewriter.reverse(address.substr(0, address.indexOf('@')));
@@ -164,13 +164,13 @@ exports.hook_rcpt = function(next, connection, params) {
             );
 
             if (!toDomain) {
-                plugin.logerror('SRS check failed for ' + address + '. Missing domain');
+                plugin.logerror('SRS check failed for ' + address + '. Missing domain', plugin, connection);
                 return next(DENY, DSN.no_such_user());
             }
 
             reversed = reversed.join('@');
         } catch (E) {
-            plugin.logerror('SRS check failed for ' + address + '. ' + E.message);
+            plugin.logerror('SRS check failed for ' + address + '. ' + E.message, plugin, connection);
             return next(DENY, DSN.no_such_user());
         }
 
@@ -197,7 +197,7 @@ exports.hook_rcpt = function(next, connection, params) {
     }
 
     let handleForwardingAddress = addressData => {
-        plugin.logdebug(plugin, 'Checking forwarding address ' + addressData._id);
+        plugin.logdebug('Checking forwarding address ' + addressData._id, plugin, connection);
         plugin.ttlcounter(
             'wdf:' + addressData._id.toString(),
             addressData.targets.length,
@@ -209,7 +209,6 @@ exports.hook_rcpt = function(next, connection, params) {
                     return next(err);
                 } else if (!result.success) {
                     connection.logdebug(
-                        plugin,
                         'Rate limit target=' +
                             addressData.address +
                             ' key=' +
@@ -219,7 +218,9 @@ exports.hook_rcpt = function(next, connection, params) {
                             ' value=' +
                             result.value +
                             ' ttl=' +
-                            result.ttl
+                            result.ttl,
+                        plugin,
+                        connection
                     );
                     return next(DENYSOFT, DSN.rcpt_too_fast());
                 }
@@ -316,7 +317,7 @@ exports.hook_rcpt = function(next, connection, params) {
             }
 
             if (!addressData || !addressData.user) {
-                plugin.logdebug(plugin, 'No such user ' + address);
+                plugin.logdebug('No such user ' + address, plugin, connection);
                 return next(DENY, DSN.no_such_user());
             }
 
@@ -389,7 +390,7 @@ exports.hook_rcpt = function(next, connection, params) {
                                 return next(DENYSOFT, DSN.rcpt_too_fast());
                             }
 
-                            plugin.logdebug(plugin, 'Added recipient ' + rcpt.address());
+                            plugin.logdebug('Added recipient ' + rcpt.address(), plugin, connection);
 
                             // update rate limit for this address after delivery
                             connection.transaction.notes.rateKeys.push({ selector, key, limit: userData.receivedMax });
@@ -416,7 +417,7 @@ exports.hook_queue = function(next, connection) {
         collector.once('end', done);
 
         collector.once('error', err => {
-            plugin.logerror('Failed to retrieve message. error=' + err.message);
+            plugin.logerror('Failed to retrieve message. error=' + err.message, plugin, connection);
             return next(DENYSOFT, 'Failed to Queue message');
         });
 
@@ -432,7 +433,7 @@ exports.hook_queue = function(next, connection) {
         let rspamd = connection.transaction.results.get('rspamd');
         if (rspamd && rspamd.score && plugin.cfg.spamScoreForwarding && rspamd.score >= plugin.cfg.spamScoreForwarding) {
             // do not forward spam messages
-            plugin.lognotice(plugin, 'FORWARDSKIP score=' + JSON.stringify(rspamd.score) + ' required=' + plugin.cfg.spamScoreForwarding);
+            plugin.lognotice('FORWARDSKIP score=' + JSON.stringify(rspamd.score) + ' required=' + plugin.cfg.spamScoreForwarding, plugin, connection);
             return collectData(done);
         }
 
@@ -484,7 +485,7 @@ exports.hook_queue = function(next, connection) {
         if (message) {
             connection.transaction.message_stream.once('error', err => message.emit('error', err));
             message.once('error', err => {
-                plugin.logerror('Failed to retrieve message. error=' + err.message);
+                plugin.logerror('Failed to retrieve message. error=' + err.message, plugin, connection);
                 return next(DENYSOFT, 'Failed to Queue message');
             });
 
@@ -549,12 +550,12 @@ exports.hook_queue = function(next, connection) {
         let pos = 0;
         let processKey = () => {
             if (pos >= rateKeys.length) {
-                plugin.logdebug(plugin, 'Rate keys processed');
+                plugin.logdebug('Rate keys processed', plugin, connection);
                 return done();
             }
 
             let rateKey = rateKeys[pos++];
-            plugin.logdebug(plugin, 'Rate key. key=' + JSON.stringify(rateKey));
+            plugin.logdebug('Rate key. key=' + JSON.stringify(rateKey), plugin, connection);
             plugin.updateRateLimit(connection, rateKey.selector || 'rcpt', rateKey.key, rateKey.limit, processKey);
         };
         processKey();
@@ -578,7 +579,7 @@ exports.hook_queue = function(next, connection) {
                 let recipient = rcptData.recipient;
                 let userData = rcptData.user;
 
-                plugin.logdebug(plugin, 'Filtering message for ' + recipient);
+                plugin.logdebug(plugin, 'Filtering message for ' + recipient, plugin, connection);
                 plugin.filterHandler.process(
                     {
                         mimeTree: prepared && prepared.mimeTree,
@@ -642,8 +643,9 @@ exports.checkRateLimit = function(connection, selector, key, limit, next) {
 
         if (!result.success) {
             connection.logdebug(
+                'Rate limit key=' + key + ' selector=' + selector + ' limit=' + limit + ' value=' + result.value + ' ttl=' + result.ttl,
                 plugin,
-                'Rate limit key=' + key + ' selector=' + selector + ' limit=' + limit + ' value=' + result.value + ' ttl=' + result.ttl
+                connection
             );
         }
 
@@ -667,7 +669,11 @@ exports.updateRateLimit = function(connection, selector, key, limit, next) {
             return next(err);
         }
 
-        connection.logdebug(plugin, 'Rate limit key=' + key + ' selector=' + selector + ' limit=' + limit + ' value=' + result.value + ' ttl=' + result.ttl);
+        connection.logdebug(
+            'Rate limit key=' + key + ' selector=' + selector + ' limit=' + limit + ' value=' + result.value + ' ttl=' + result.ttl,
+            plugin,
+            connection
+        );
 
         return next(null, result.success);
     });
