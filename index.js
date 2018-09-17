@@ -29,7 +29,7 @@ DSN.rcpt_too_fast = () =>
 
 exports.register = function() {
     let plugin = this;
-    plugin.logdebug('Initializing rcpt_to Wild Duck plugin.');
+    plugin.logdebug(plugin, 'Initializing rcpt_to Wild Duck plugin.');
     plugin.load_wildduck_ini();
 
     plugin.register_hook('init_master', 'init_wildduck_shared');
@@ -86,7 +86,7 @@ exports.open_database = function(server, next) {
                 spamScoreValue: plugin.cfg.spamScore
             });
 
-            plugin.loginfo('Database connection opened');
+            plugin.loginfo(plugin, 'Database connection opened');
             next();
         }
     );
@@ -149,7 +149,7 @@ exports.hook_rcpt = function(next, connection, params) {
 
     connection.transaction.notes.targets.recipients.add(address);
 
-    plugin.logdebug('Checking validity of ' + address);
+    plugin.logdebug(plugin, 'Checking validity of ' + address);
 
     if (/^SRS\d+=/.test(address)) {
         plugin.logdebug(address + ' seems to be SRS');
@@ -197,7 +197,7 @@ exports.hook_rcpt = function(next, connection, params) {
     }
 
     let handleForwardingAddress = addressData => {
-        plugin.logdebug('Checking forwarding address ' + addressData._id);
+        plugin.logdebug(plugin, 'Checking forwarding address ' + addressData._id);
         plugin.ttlcounter(
             'wdf:' + addressData._id.toString(),
             addressData.targets.length,
@@ -316,7 +316,7 @@ exports.hook_rcpt = function(next, connection, params) {
             }
 
             if (!addressData || !addressData.user) {
-                plugin.logdebug('No such user ' + address);
+                plugin.logdebug(plugin, 'No such user ' + address);
                 return next(DENY, DSN.no_such_user());
             }
 
@@ -389,7 +389,7 @@ exports.hook_rcpt = function(next, connection, params) {
                                 return next(DENYSOFT, DSN.rcpt_too_fast());
                             }
 
-                            plugin.logdebug('Added recipient ' + rcpt.address());
+                            plugin.logdebug(plugin, 'Added recipient ' + rcpt.address());
 
                             // update rate limit for this address after delivery
                             connection.transaction.notes.rateKeys.push({ selector, key, limit: userData.receivedMax });
@@ -432,7 +432,7 @@ exports.hook_queue = function(next, connection) {
         let rspamd = connection.transaction.results.get('rspamd');
         if (rspamd && rspamd.score && plugin.cfg.spamScoreForwarding && rspamd.score >= plugin.cfg.spamScoreForwarding) {
             // do not forward spam messages
-            plugin.lognotice('FORWARDSKIP score=' + JSON.stringify(rspamd.score) + ' required=' + plugin.cfg.spamScoreForwarding);
+            plugin.lognotice(plugin, 'FORWARDSKIP score=' + JSON.stringify(rspamd.score) + ' required=' + plugin.cfg.spamScoreForwarding);
             return collectData(done);
         }
 
@@ -549,12 +549,12 @@ exports.hook_queue = function(next, connection) {
         let pos = 0;
         let processKey = () => {
             if (pos >= rateKeys.length) {
-                plugin.logdebug('Rate keys processed');
+                plugin.logdebug(plugin, 'Rate keys processed');
                 return done();
             }
 
             let rateKey = rateKeys[pos++];
-            plugin.logdebug('Rate key. key=' + JSON.stringify(rateKey));
+            plugin.logdebug(plugin, 'Rate key. key=' + JSON.stringify(rateKey));
             plugin.updateRateLimit(connection, rateKey.selector || 'rcpt', rateKey.key, rateKey.limit, processKey);
         };
         processKey();
@@ -578,7 +578,7 @@ exports.hook_queue = function(next, connection) {
                 let recipient = rcptData.recipient;
                 let userData = rcptData.user;
 
-                plugin.logdebug('Filtering message for ' + recipient);
+                plugin.logdebug(plugin, 'Filtering message for ' + recipient);
                 plugin.filterHandler.process(
                     {
                         mimeTree: prepared && prepared.mimeTree,
