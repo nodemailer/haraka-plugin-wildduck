@@ -429,6 +429,13 @@ exports.hook_queue = function(next, connection) {
             return collectData(done);
         }
 
+        let rspamd = connection.transaction.results.get('rspamd');
+        if (rspamd && rspamd.score && plugin.cfg.spamScoreForwarding && rspamd.score >= plugin.cfg.spamScoreForwarding) {
+            // do not forward spam messages
+            plugin.lognotice('FORWARDSKIP score=' + JSON.stringify(rspamd.score) + ' required=' + plugin.cfg.spamScoreForwarding);
+            return collectData(done);
+        }
+
         let targets =
             (connection.transaction.notes.targets.forward.size &&
                 Array.from(connection.transaction.notes.targets.forward).map(row => ({

@@ -70,6 +70,9 @@ limits:
 
 spamScore: 6
 
+# do not process forwarding addresses for messages with the following spam score
+spamScoreForwarding: 10
+
 spamHeaders:
   # If this header exists and starts with "yes" then the message is treated as spam
   # This is SpamAssassin header.
