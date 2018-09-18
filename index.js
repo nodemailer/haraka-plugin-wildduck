@@ -189,7 +189,7 @@ exports.hook_rcpt = function(next, connection, params) {
                 // update rate limit for this address after delivery
                 connection.transaction.notes.rateKeys.push({ selector, key });
 
-                plugin.lognotice('RECIPIENT SRS target=' + reversed, plugin, connection);
+                plugin.loginfo('RECIPIENT SRS target=' + reversed, plugin, connection);
 
                 connection.transaction.notes.targets.forward.set(reversed, { type: 'mail', value: reversed });
                 return next(OK);
@@ -225,8 +225,8 @@ exports.hook_rcpt = function(next, connection, params) {
                     return next(DENYSOFT, DSN.rcpt_too_fast());
                 }
 
-                plugin.lognotice(
-                    'RECIPIENT FORWARD id=' +
+                plugin.loginfo(
+                    'FORWARDING id=' +
                         addressData._id +
                         ' address=' +
                         addressData.address +
@@ -340,6 +340,7 @@ exports.hook_rcpt = function(next, connection, params) {
                 {
                     // extra fields are needed later in the filtering step
                     name: true,
+                    address: true,
                     forwards: true,
                     targets: true,
                     autoreply: true,
@@ -404,7 +405,7 @@ exports.hook_rcpt = function(next, connection, params) {
                                 return next(DENYSOFT, DSN.rcpt_too_fast());
                             }
 
-                            plugin.logdebug('Added recipient ' + rcpt.address(), plugin, connection);
+                            plugin.loginfo('RESOLVED address=' + rcpt.address() + ' user=' + userData.address, plugin, connection);
 
                             // update rate limit for this address after delivery
                             connection.transaction.notes.rateKeys.push({ selector, key, limit: userData.receivedMax });
@@ -447,7 +448,7 @@ exports.hook_queue = function(next, connection) {
         let rspamd = connection.transaction.results.get('rspamd');
         if (rspamd && rspamd.score && plugin.cfg.spamScoreForwarding && rspamd.score >= plugin.cfg.spamScoreForwarding) {
             // do not forward spam messages
-            plugin.lognotice('FORWARDSKIP score=' + JSON.stringify(rspamd.score) + ' required=' + plugin.cfg.spamScoreForwarding, plugin, connection);
+            plugin.loginfo('FORWARDSKIP score=' + JSON.stringify(rspamd.score) + ' required=' + plugin.cfg.spamScoreForwarding, plugin, connection);
             return collectData(done);
         }
 
@@ -481,7 +482,7 @@ exports.hook_queue = function(next, connection) {
                 return done(err, ...args);
             }
 
-            plugin.lognotice('QUEUED FORWARD id=' + args[0].id, plugin, connection);
+            plugin.loginfo('QUEUED FORWARD id=' + args[0].id, plugin, connection);
 
             plugin.db.database.collection('messagelog').insertOne(
                 {
@@ -564,7 +565,7 @@ exports.hook_queue = function(next, connection) {
                         return done(err, ...args);
                     }
 
-                    plugin.lognotice('QUEUED AUTOREPLY id=' + args[0].id, plugin, connection);
+                    plugin.loginfo('QUEUED AUTOREPLY id=' + args[0].id, plugin, connection);
                     return done(err, ...args);
                 }
             );
@@ -632,21 +633,21 @@ exports.hook_queue = function(next, connection) {
                         if (err) {
                             // we can fail the message even if some recipients were already processed
                             // as redelivery would not be a problem - duplicate deliveries are ignored (filters are rerun though).
-                            plugin.lognotice('DEFERRED recipient=' + recipient + ' error=' + err.message, plugin, connection);
+                            plugin.loginfo('DEFERRED recipient=' + recipient + ' error=' + err.message, plugin, connection);
                             return next(DENYSOFT, 'Failed to Queue message');
                         }
 
                         if (response && response.error) {
                             if (response.error.code === 'DroppedByPolicy') {
-                                plugin.lognotice('DROPPED recipient=' + recipient + ' error=' + response.error.message, plugin, connection);
+                                plugin.loginfo('DROPPED recipient=' + recipient + ' error=' + response.error.message, plugin, connection);
                             } else {
-                                plugin.lognotice('DEFERRED recipient=' + recipient + ' error=' + response.error.message, plugin, connection);
+                                plugin.loginfo('DEFERRED recipient=' + recipient + ' error=' + response.error.message, plugin, connection);
                             }
 
                             return next(response.error.code === 'DroppedByPolicy' ? DENY : DENYSOFT, response.error.message);
                         }
 
-                        plugin.lognotice('STORED recipient=' + recipient + ' result=' + response.response, plugin, connection);
+                        plugin.loginfo('STORED recipient=' + userData.address + ' result=' + response.response, plugin, connection);
 
                         if (!prepared && preparedResponse) {
                             // reuse parsed message structure
