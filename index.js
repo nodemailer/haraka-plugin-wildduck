@@ -198,19 +198,6 @@ exports.hook_rcpt = function(next, connection, params) {
     }
 
     let handleForwardingAddress = addressData => {
-        plugin.logdebug('Checking forwarding address ' + addressData._id, plugin, connection);
-
-        plugin.lognotice(
-            'RECIPIENT FORWARD id=' +
-                addressData._id +
-                ' address=' +
-                addressData.address +
-                ' target=' +
-                addressData.targets.map(target => target.toString().replace(/\?.*$/, '')).join(','),
-            plugin,
-            connection
-        );
-
         plugin.ttlcounter(
             'wdf:' + addressData._id.toString(),
             addressData.targets.length,
@@ -221,8 +208,8 @@ exports.hook_rcpt = function(next, connection, params) {
                     // failed checks
                     return next(err);
                 } else if (!result.success) {
-                    connection.logdebug(
-                        'Rate limit target=' +
+                    connection.lognotice(
+                        'RATELIMITED target=' +
                             addressData.address +
                             ' key=' +
                             addressData._id +
@@ -237,6 +224,17 @@ exports.hook_rcpt = function(next, connection, params) {
                     );
                     return next(DENYSOFT, DSN.rcpt_too_fast());
                 }
+
+                plugin.lognotice(
+                    'RECIPIENT FORWARD id=' +
+                        addressData._id +
+                        ' address=' +
+                        addressData.address +
+                        ' target=' +
+                        addressData.targets.map(target => ((target && target.value) || target).toString().replace(/\?.*$/, '')).join(','),
+                    plugin,
+                    connection
+                );
 
                 if (addressData.autoreply) {
                     connection.transaction.notes.targets.autoreplies.set(addressData.addrview, addressData);
@@ -280,13 +278,16 @@ exports.hook_rcpt = function(next, connection, params) {
                         { _id: target.user },
                         {
                             // extra fields are needed later in the filtering step
-                            name: true,
-                            forwards: true,
-                            targets: true,
-                            autoreply: true,
-                            encryptMessages: true,
-                            encryptForwarded: true,
-                            pubKey: true
+                            projection: {
+                                _id: true,
+                                name: true,
+                                forwards: true,
+                                targets: true,
+                                autoreply: true,
+                                encryptMessages: true,
+                                encryptForwarded: true,
+                                pubKey: true
+                            }
                         },
                         (err, userData) => {
                             if (err) {
@@ -319,7 +320,7 @@ exports.hook_rcpt = function(next, connection, params) {
 
     plugin.db.userHandler.resolveAddress(
         address,
-        { wildcard: true, fields: { name: true, address: true, addrview: true, autoreply: true } },
+        { wildcard: true, projection: { name: true, address: true, addrview: true, autoreply: true } },
         (err, addressData) => {
             if (err) {
                 return next(err);
@@ -674,6 +675,7 @@ exports.checkRateLimit = function(connection, selector, key, limit, next) {
 
     plugin.ttlcounter('rl:' + selector + ':' + key, 0, limit, windowSize, (err, result) => {
         if (err) {
+            plugin.logerror('RATELIMITERR error=' + err.message, plugin, connection);
             return next(err);
         }
 
