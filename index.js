@@ -645,7 +645,7 @@ exports.hook_queue = function(next, connection) {
                             return next(response.error.code === 'DroppedByPolicy' ? DENY : DENYSOFT, response.error.message);
                         }
 
-                        plugin.lognotice('STORED recipient=' + recipient, plugin, connection);
+                        plugin.lognotice('STORED recipient=' + recipient + ' result=' + response.response, plugin, connection);
 
                         if (!prepared && preparedResponse) {
                             // reuse parsed message structure
