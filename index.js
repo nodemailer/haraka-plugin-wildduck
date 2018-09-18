@@ -152,7 +152,6 @@ exports.hook_rcpt = function(next, connection, params) {
     plugin.logdebug('Checking validity of ' + address, plugin, connection);
 
     if (/^SRS\d+=/.test(address)) {
-        plugin.logdebug(address + ' seems to be SRS', plugin, connection);
         let reversed = false;
         try {
             reversed = plugin.srsRewriter.reverse(address.substr(0, address.indexOf('@')));
@@ -190,6 +189,8 @@ exports.hook_rcpt = function(next, connection, params) {
                 // update rate limit for this address after delivery
                 connection.transaction.notes.rateKeys.push({ selector, key });
 
+                plugin.lognotice('RECIPIENT SRS target=' + reversed, plugin, connection);
+
                 connection.transaction.notes.targets.forward.set(reversed, { type: 'mail', value: reversed });
                 return next(OK);
             });
@@ -198,6 +199,18 @@ exports.hook_rcpt = function(next, connection, params) {
 
     let handleForwardingAddress = addressData => {
         plugin.logdebug('Checking forwarding address ' + addressData._id, plugin, connection);
+
+        plugin.lognotice(
+            'RECIPIENT FORWARD id=' +
+                addressData._id +
+                ' address=' +
+                addressData.address +
+                ' target=' +
+                addressData.targets.map(target => target.toString().replace(/\?.*$/, '')).join(','),
+            plugin,
+            connection
+        );
+
         plugin.ttlcounter(
             'wdf:' + addressData._id.toString(),
             addressData.targets.length,
@@ -467,6 +480,8 @@ exports.hook_queue = function(next, connection) {
                 return done(err, ...args);
             }
 
+            plugin.lognotice('QUEUED FORWARD id=' + args[0].id, plugin, connection);
+
             plugin.db.database.collection('messagelog').insertOne(
                 {
                     id: args[0].id,
@@ -485,7 +500,7 @@ exports.hook_queue = function(next, connection) {
         if (message) {
             connection.transaction.message_stream.once('error', err => message.emit('error', err));
             message.once('error', err => {
-                plugin.logerror('Failed to retrieve message. error=' + err.message, plugin, connection);
+                plugin.logerror('QUEUEERROR Failed to retrieve message. error=' + err.message, plugin, connection);
                 return next(DENYSOFT, 'Failed to Queue message');
             });
 
@@ -538,7 +553,19 @@ exports.hook_queue = function(next, connection) {
                     messageHandler: plugin.db.messageHandler
                 },
                 autoreplyData,
-                processNext
+                (err, ...args) => {
+                    if (err || !args[0]) {
+                        if (err) {
+                            // don't really care
+                            plugin.lognotice('AUTOREPLY ERROR recipient=' + connection.transaction.notes.sender + ' error=' + err.message, plugin, connection);
+                            return processNext();
+                        }
+                        return done(err, ...args);
+                    }
+
+                    plugin.lognotice('QUEUED AUTOREPLY id=' + args[0].id, plugin, connection);
+                    return done(err, ...args);
+                }
             );
         };
         processNext();
@@ -604,12 +631,21 @@ exports.hook_queue = function(next, connection) {
                         if (err) {
                             // we can fail the message even if some recipients were already processed
                             // as redelivery would not be a problem - duplicate deliveries are ignored (filters are rerun though).
+                            plugin.lognotice('DEFERRED recipient=' + recipient + ' error=' + err.message, plugin, connection);
                             return next(DENYSOFT, 'Failed to Queue message');
                         }
 
                         if (response && response.error) {
+                            if (response.error.code === 'DroppedByPolicy') {
+                                plugin.lognotice('DROPPED recipient=' + recipient + ' error=' + response.error.message, plugin, connection);
+                            } else {
+                                plugin.lognotice('DEFERRED recipient=' + recipient + ' error=' + response.error.message, plugin, connection);
+                            }
+
                             return next(response.error.code === 'DroppedByPolicy' ? DENY : DENYSOFT, response.error.message);
                         }
+
+                        plugin.lognotice('STORED recipient=' + recipient, plugin, connection);
 
                         if (!prepared && preparedResponse) {
                             // reuse parsed message structure
@@ -642,8 +678,8 @@ exports.checkRateLimit = function(connection, selector, key, limit, next) {
         }
 
         if (!result.success) {
-            connection.logdebug(
-                'Rate limit key=' + key + ' selector=' + selector + ' limit=' + limit + ' value=' + result.value + ' ttl=' + result.ttl,
+            connection.lognotice(
+                'RATELIMITED key=' + key + ' selector=' + selector + ' limit=' + limit + ' value=' + result.value + ' ttl=' + result.ttl,
                 plugin,
                 connection
             );
@@ -666,6 +702,7 @@ exports.updateRateLimit = function(connection, selector, key, limit, next) {
 
     plugin.ttlcounter('rl:' + selector + ':' + key, 1, limit, windowSize, (err, result) => {
         if (err) {
+            plugin.logerror('RATELIMITERR error=' + err.message, plugin, connection);
             return next(err);
         }
 
