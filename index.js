@@ -281,6 +281,7 @@ exports.hook_rcpt = function(next, connection, params) {
                             projection: {
                                 _id: true,
                                 name: true,
+                                address: true,
                                 forwards: true,
                                 targets: true,
                                 autoreply: true,
