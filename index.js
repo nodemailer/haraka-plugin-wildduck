@@ -287,7 +287,10 @@ exports.hook_rcpt = function(next, connection, params) {
                                 autoreply: true,
                                 encryptMessages: true,
                                 encryptForwarded: true,
-                                pubKey: true
+                                pubKey: true,
+                                spamLevel: true,
+                                storageUsed: true,
+                                quota: true
                             }
                         },
                         (err, userData) => {
@@ -347,7 +350,10 @@ exports.hook_rcpt = function(next, connection, params) {
                     autoreply: true,
                     encryptMessages: true,
                     encryptForwarded: true,
-                    pubKey: true
+                    pubKey: true,
+                    spamLevel: true,
+                    storageUsed: true,
+                    quota: true
                 },
                 (err, userData) => {
                     if (err) {
