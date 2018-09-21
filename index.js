@@ -647,6 +647,25 @@ exports.hook_queue = function(next, connection) {
                             return next(DENYSOFT, 'Failed to Queue message');
                         }
 
+                        if (response && response.filterResults && response.filterResults.length) {
+                            let msg = [];
+                            response.filterResults.forEach(entry => {
+                                Object.keys(entry).forEach(key => {
+                                    if (!entry[key]) {
+                                        return;
+                                    }
+                                    if (typeof entry[key] === 'boolean') {
+                                        msg.push(key);
+                                    } else {
+                                        msg.push(key + '=' + (entry[key] || '').toString());
+                                    }
+                                });
+                            });
+                            if (msg.length) {
+                                plugin.loginfo('FILTER ACTIONS ' + msg.join(' '), plugin, connection);
+                            }
+                        }
+
                         if (response && response.error) {
                             if (response.error.code === 'DroppedByPolicy') {
                                 plugin.loginfo(
