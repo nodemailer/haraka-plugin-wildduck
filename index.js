@@ -459,7 +459,19 @@ exports.hook_queue = function(next, connection) {
         if (rspamd && rspamd.score && plugin.cfg.spamScoreForwarding && rspamd.score >= plugin.cfg.spamScoreForwarding) {
             // do not forward spam messages
             plugin.loginfo('FORWARDSKIP score=' + JSON.stringify(rspamd.score) + ' required=' + plugin.cfg.spamScoreForwarding, plugin, connection);
-            return collectData(done);
+
+            return plugin.db.database.collection('messagelog').insertOne(
+                {
+                    id: connection.transaction.uuid,
+                    queueId: connection.transaction.uuid,
+                    action: 'FORWARDSKIP',
+                    from: connection.transaction.notes.sender,
+                    to: Array.from(connection.transaction.notes.targets.recipients),
+                    score: rspamd.score,
+                    created: new Date()
+                },
+                () => collectData(done)
+            );
         }
 
         let targets =
@@ -600,106 +612,134 @@ exports.hook_queue = function(next, connection) {
         processKey();
     };
 
-    // try to forward the message. If forwarding is not needed then continues immediatelly
-    forwardMessage(() => {
-        // send autoreplies to forwarded addresses (if needed)
-        sendAutoreplies(() => {
-            let prepared = false;
+    let logEntry = done => {
+        let rspamd = connection.transaction.results.get('rspamd');
+        return plugin.db.database.collection('messagelog').insertOne(
+            {
+                id: connection.transaction.uuid,
+                queueId: connection.transaction.uuid,
+                action: 'MX',
+                from: connection.transaction.notes.sender,
+                to: Array.from(connection.transaction.notes.targets.recipients),
+                score: rspamd && rspamd.score,
+                created: new Date()
+            },
+            done
+        );
+    };
 
-            let users = Array.from(connection.transaction.notes.targets.users).map(e => e[1]);
-            let stored = 0;
+    logEntry(() => {
+        // try to forward the message. If forwarding is not needed then continues immediatelly
+        forwardMessage(() => {
+            // send autoreplies to forwarded addresses (if needed)
+            sendAutoreplies(() => {
+                let prepared = false;
 
-            let storeNext = () => {
-                if (stored >= users.length) {
-                    return updateRateLimits(() => next(OK, 'Message processed'));
-                }
+                let users = Array.from(connection.transaction.notes.targets.users).map(e => e[1]);
+                let stored = 0;
 
-                let rcptData = users[stored++];
-                let recipient = rcptData.recipient;
-                let userData = rcptData.user;
-
-                plugin.logdebug(plugin, 'Filtering message for ' + recipient, plugin, connection);
-                plugin.filterHandler.process(
-                    {
-                        mimeTree: prepared && prepared.mimeTree,
-                        maildata: prepared && prepared.maildata,
-                        user: userData,
-                        sender: connection.transaction.notes.sender,
-                        recipient,
-                        chunks: collector.chunks,
-                        chunklen: collector.chunklen,
-                        meta: {
-                            transactionId: connection.transaction.uuid,
-                            source: 'MX',
-                            from: connection.transaction.notes.sender,
-                            to: [recipient],
-                            origin: connection.remote_ip,
-                            transhost: connection.hello.host,
-                            transtype: connection.transaction.notes.transmissionType,
-                            time: new Date()
-                        }
-                    },
-                    (err, response, preparedResponse) => {
-                        if (err) {
-                            // we can fail the message even if some recipients were already processed
-                            // as redelivery would not be a problem - duplicate deliveries are ignored (filters are rerun though).
-                            plugin.loginfo('DEFERRED rcpt=' + recipient + ' error=' + err.message, plugin, connection);
-                            return next(DENYSOFT, 'Failed to Queue message');
-                        }
-
-                        if (response && response.filterResults && response.filterResults.length) {
-                            let msg = [];
-                            response.filterResults.forEach(entry => {
-                                Object.keys(entry).forEach(key => {
-                                    if (!entry[key]) {
-                                        return;
-                                    }
-                                    if (typeof entry[key] === 'boolean') {
-                                        msg.push(key);
-                                    } else {
-                                        msg.push(key + '=' + (entry[key] || '').toString());
-                                    }
-                                });
-                            });
-                            if (msg.length) {
-                                plugin.loginfo('FILTER ACTIONS ' + msg.join(' '), plugin, connection);
-                            }
-                        }
-
-                        if (response && response.error) {
-                            if (response.error.code === 'DroppedByPolicy') {
-                                plugin.loginfo(
-                                    'DROPPED rcpt=' + recipient + ' user=' + userData.address + '[' + userData._id + '] error=' + response.error.message,
-                                    plugin,
-                                    connection
-                                );
-                            } else {
-                                plugin.loginfo(
-                                    'DEFERRED rcpt=' + recipient + ' user=' + userData.address + '[' + userData._id + '] error=' + response.error.message,
-                                    plugin,
-                                    connection
-                                );
-                            }
-
-                            return next(response.error.code === 'DroppedByPolicy' ? DENY : DENYSOFT, response.error.message);
-                        }
-
-                        plugin.loginfo(
-                            'STORED rcpt=' + recipient + ' user=' + userData.address + '[' + userData._id + '] result=' + response.response,
-                            plugin,
-                            connection
-                        );
-
-                        if (!prepared && preparedResponse) {
-                            // reuse parsed message structure
-                            prepared = preparedResponse;
-                        }
-
-                        setImmediate(storeNext);
+                let storeNext = () => {
+                    if (stored >= users.length) {
+                        return updateRateLimits(() => next(OK, 'Message processed'));
                     }
-                );
-            };
-            storeNext();
+
+                    let rcptData = users[stored++];
+                    let recipient = rcptData.recipient;
+                    let userData = rcptData.user;
+
+                    plugin.logdebug(plugin, 'Filtering message for ' + recipient, plugin, connection);
+                    plugin.filterHandler.process(
+                        {
+                            mimeTree: prepared && prepared.mimeTree,
+                            maildata: prepared && prepared.maildata,
+                            user: userData,
+                            sender: connection.transaction.notes.sender,
+                            recipient,
+                            chunks: collector.chunks,
+                            chunklen: collector.chunklen,
+                            meta: {
+                                transactionId: connection.transaction.uuid,
+                                source: 'MX',
+                                from: connection.transaction.notes.sender,
+                                to: [recipient],
+                                origin: connection.remote_ip,
+                                transhost: connection.hello.host,
+                                transtype: connection.transaction.notes.transmissionType,
+                                time: new Date()
+                            }
+                        },
+                        (err, response, preparedResponse) => {
+                            if (err) {
+                                plugin.db.database.collection('messagelog').insertOne(
+                                    {
+                                        id: connection.transaction.uuid,
+                                        queueId: connection.transaction.uuid,
+                                        action: 'ERROR',
+                                        error: err.message,
+                                        created: new Date()
+                                    },
+                                    () => false
+                                );
+                                // we can fail the message even if some recipients were already processed
+                                // as redelivery would not be a problem - duplicate deliveries are ignored (filters are rerun though).
+                                plugin.loginfo('DEFERRED rcpt=' + recipient + ' error=' + err.message, plugin, connection);
+                                return next(DENYSOFT, 'Failed to Queue message');
+                            }
+
+                            if (response && response.filterResults && response.filterResults.length) {
+                                let msg = [];
+                                response.filterResults.forEach(entry => {
+                                    Object.keys(entry).forEach(key => {
+                                        if (!entry[key]) {
+                                            return;
+                                        }
+                                        if (typeof entry[key] === 'boolean') {
+                                            msg.push(key);
+                                        } else {
+                                            msg.push(key + '=' + (entry[key] || '').toString());
+                                        }
+                                    });
+                                });
+                                if (msg.length) {
+                                    plugin.loginfo('FILTER ACTIONS ' + msg.join(' '), plugin, connection);
+                                }
+                            }
+
+                            if (response && response.error) {
+                                if (response.error.code === 'DroppedByPolicy') {
+                                    plugin.loginfo(
+                                        'DROPPED rcpt=' + recipient + ' user=' + userData.address + '[' + userData._id + '] error=' + response.error.message,
+                                        plugin,
+                                        connection
+                                    );
+                                } else {
+                                    plugin.loginfo(
+                                        'DEFERRED rcpt=' + recipient + ' user=' + userData.address + '[' + userData._id + '] error=' + response.error.message,
+                                        plugin,
+                                        connection
+                                    );
+                                }
+
+                                return next(response.error.code === 'DroppedByPolicy' ? DENY : DENYSOFT, response.error.message);
+                            }
+
+                            plugin.loginfo(
+                                'STORED rcpt=' + recipient + ' user=' + userData.address + '[' + userData._id + '] result=' + response.response,
+                                plugin,
+                                connection
+                            );
+
+                            if (!prepared && preparedResponse) {
+                                // reuse parsed message structure
+                                prepared = preparedResponse;
+                            }
+
+                            setImmediate(storeNext);
+                        }
+                    );
+                };
+                storeNext();
+            });
         });
     });
 };
