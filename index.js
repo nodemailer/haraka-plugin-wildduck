@@ -59,13 +59,14 @@ exports.open_database = function(server, next) {
         secret: plugin.cfg.srs.secret
     });
 
-    plugin.hostname = plugin.cfg.gelf.hostname || os.hostname();
-    plugin.gelf = plugin.cfg.gelf.enabled
-        ? new Gelf(plugin.cfg.gelf.options)
-        : {
-              // placeholder
-              emit: () => false
-          };
+    plugin.hostname = (plugin.cfg.gelf && plugin.cfg.gelf.hostname) || os.hostname();
+    plugin.gelf =
+        plugin.cfg.gelf && plugin.cfg.gelf.enabled
+            ? new Gelf(plugin.cfg.gelf.options)
+            : {
+                  // placeholder
+                  emit: () => false
+              };
     plugin.loggelf = message => {
         if (typeof message === 'string') {
             message = {
