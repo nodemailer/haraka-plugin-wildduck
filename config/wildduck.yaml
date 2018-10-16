@@ -96,3 +96,10 @@ spamHeaders:
   - key: "X-Haraka-Virus"
     value: "."
     target: "\\Junk"
+
+gelf:
+  enabled: false
+  options:
+    graylogPort: 12201
+    graylogHostname: '127.0.0.1'
+    connection: 'lan'

@@ -6,6 +6,7 @@
 // disable config loading by Wild Duck
 process.env.DISABLE_WILD_CONFIG = 'true';
 
+const os = require('os');
 const ObjectID = require('mongodb').ObjectID;
 const db = require('./lib/db');
 const DSN = require('./dsn');
@@ -18,6 +19,7 @@ const Maildropper = require('wildduck/lib/maildropper');
 const FilterHandler = require('wildduck/lib/filter-handler');
 const autoreply = require('wildduck/lib/autoreply');
 const consts = require('wildduck/lib/consts');
+const Gelf = require('gelf');
 
 DSN.rcpt_too_fast = () =>
     DSN.create(
@@ -56,6 +58,25 @@ exports.open_database = function(server, next) {
     plugin.srsRewriter = new SRS({
         secret: plugin.cfg.srs.secret
     });
+
+    plugin.hostname = plugin.cfg.gelf.hostname || os.hostname();
+    plugin.gelf = plugin.cfg.gelf.enabled
+        ? new Gelf(plugin.cfg.gelf.options)
+        : {
+              // placeholder
+              emit: () => false
+          };
+    plugin.loggelf = message => {
+        if (typeof message === 'string') {
+            message = {
+                short_message: message
+            };
+        }
+        message = message || {};
+        message.host = plugin.hostname;
+        message.timestamp = Date.now() / 1000;
+        plugin.gelf.emit('gelf.log', message);
+    };
 
     db.connect(
         server.notes.redis,
@@ -728,6 +749,20 @@ exports.hook_queue = function(next, connection) {
                                 plugin,
                                 connection
                             );
+
+                            let messageId = connection.transaction.header.get_all('Message-Id');
+
+                            plugin.loggelf({
+                                short_message: 'Stored email',
+                                _queue: connection.transaction.uuid,
+                                _remote_address: connection.remote_ip,
+                                _user: userData._id.toString(),
+                                _mail_from: connection.transaction.notes.sender,
+                                _rcpt_to: recipient,
+                                _message_id: messageId[0],
+                                _score: plugin.cfg.spamScore,
+                                _response: response.response
+                            });
 
                             if (!prepared && preparedResponse) {
                                 // reuse parsed message structure
