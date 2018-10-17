@@ -75,9 +75,10 @@ exports.open_database = function(server, next) {
             };
         }
         message = message || {};
-        message.facility = 'mx';
+        message.facility = 'mx'; // facility is deprecated but set by the driver if not provided
         message.host = plugin.hostname;
         message.timestamp = Date.now() / 1000;
+        message._component = 'mx';
         plugin.gelf.emit('gelf.log', message);
     };
 
@@ -239,6 +240,8 @@ exports.hook_rcpt = function(next, connection, params) {
             resolution = {
                 full_message: err.stack,
                 _srs: 'yes',
+
+                _failure: 'yes',
                 _error: 'srs check failed',
                 _err_code: err.code
             };
@@ -256,6 +259,8 @@ exports.hook_rcpt = function(next, connection, params) {
                         _srs: 'yes',
                         _rate_limit: 'yes',
                         _selector: selector,
+
+                        _failure: 'yes',
                         _error: 'rate limit check failed',
                         _err_code: err.code
                     };
@@ -302,6 +307,8 @@ exports.hook_rcpt = function(next, connection, params) {
                         _forward: 'yes',
                         _rate_limit: 'yes',
                         _selector: 'user',
+
+                        _failure: 'yes',
                         _error: 'rate limit check failed',
                         _err_code: err.code
                     };
@@ -420,6 +427,9 @@ exports.hook_rcpt = function(next, connection, params) {
                                     full_message: err.stack,
                                     _collection: 'users',
                                     _db_query: '_id:' + targetData.user,
+
+                                    _error: 'failed to make a db query',
+                                    _failure: 'yes',
                                     _err_code: err.code
                                 };
                                 return hookDone(err);
@@ -482,6 +492,9 @@ exports.hook_rcpt = function(next, connection, params) {
                     full_message: err.stack,
                     _api: 'resolveAddress',
                     _db_query: 'address:' + address,
+
+                    _error: 'failed to resolve an address',
+                    _failure: 'yes',
                     _err_code: err.code
                 };
                 return hookDone(err);
@@ -522,6 +535,9 @@ exports.hook_rcpt = function(next, connection, params) {
                             full_message: err.stack,
                             _api: 'getUser',
                             _db_query: 'user:' + addressData.user,
+
+                            _error: 'failed to fetch user',
+                            _failure: 'yes',
                             _err_code: err.code
                         };
                         return hookDone(err);
@@ -571,7 +587,9 @@ exports.hook_rcpt = function(next, connection, params) {
                                     full_message: err.stack,
                                     _rate_limit: 'yes',
                                     _selector: selector,
+
                                     _error: 'rate limit check failed',
+                                    _failure: 'yes',
                                     _err_code: err.code
                                 };
                                 return hookDone(err);
@@ -602,7 +620,9 @@ exports.hook_rcpt = function(next, connection, params) {
                                     full_message: err.stack,
                                     _rate_limit: 'yes',
                                     _selector: selector,
+
                                     _error: 'rate limit check failed',
+                                    _failure: 'yes',
                                     _err_code: err.code
                                 };
                                 return hookDone(err);
@@ -679,8 +699,10 @@ exports.hook_queue = function(next, connection) {
             plugin.logerror('PIPEFAIL error=' + err.message, plugin, connection);
             sendLogEntry({
                 full_message: err.stack,
-                _err_code: err.code,
-                _error: 'pipefail processing input'
+
+                _error: 'pipefail processing input',
+                _failure: 'yes',
+                _err_code: err.code
             });
             return next(DENYSOFT, 'Failed to Queue message');
         });
@@ -740,8 +762,10 @@ exports.hook_queue = function(next, connection) {
                     err.code = err.code || 'ERRCOMPOSE';
                     sendLogEntry({
                         full_message: err.stack,
-                        _err_code: err.code,
-                        _error: 'failed to store message'
+
+                        _error: 'failed to store message',
+                        _failure: 'yes',
+                        _err_code: err.code
                     });
                     return next(DENYSOFT, 'Failed to Queue message');
                 }
@@ -778,8 +802,10 @@ exports.hook_queue = function(next, connection) {
                 plugin.logerror('QUEUEERROR Failed to retrieve message. error=' + err.message, plugin, connection);
                 sendLogEntry({
                     full_message: err.stack,
-                    _err_code: err.code,
-                    _error: 'failed to retrieve message from input'
+
+                    _error: 'failed to retrieve message from input',
+                    _failure: 'yes',
+                    _err_code: err.code
                 });
                 return next(DENYSOFT, 'Failed to Queue message');
             });
@@ -946,11 +972,13 @@ exports.hook_queue = function(next, connection) {
 
                                 sendLogEntry({
                                     full_message: err.stack,
-                                    _err_code: err.code,
+
                                     _user: userData._id.toString(),
                                     _address: recipient,
-                                    _failed: 'yes',
-                                    _error: 'failed to store message'
+
+                                    _error: 'failed to store message',
+                                    _failure: 'yes',
+                                    _err_code: err.code
                                 });
 
                                 // we can fail the message even if some recipients were already processed
@@ -1006,12 +1034,14 @@ exports.hook_queue = function(next, connection) {
                                 if (response.error.code === 'DroppedByPolicy') {
                                     sendLogEntry({
                                         full_message: response.error.message,
-                                        _err_code: response.error.code,
+
                                         _user: userData._id.toString(),
                                         _address: recipient,
-                                        _dropped: 'yes',
+                                        _filter: filterMessages.length ? filterMessages.join('\n') : false,
+
                                         _error: 'message dropped',
-                                        _filter: filterMessages.length ? filterMessages.join('\n') : false
+                                        _dropped: 'yes',
+                                        _err_code: response.error.code
                                     });
                                     plugin.loginfo(
                                         'DROPPED rcpt=' + recipient + ' user=' + userData.address + '[' + userData._id + '] error=' + response.error.message,
@@ -1021,12 +1051,14 @@ exports.hook_queue = function(next, connection) {
                                 } else {
                                     sendLogEntry({
                                         full_message: response.error.stack,
-                                        _err_code: response.error.code,
+
                                         _user: userData._id.toString(),
                                         _address: recipient,
-                                        _failed: 'yes',
+                                        _filter: filterMessages.length ? filterMessages.join('\n') : false,
+
                                         _error: 'failed to store message',
-                                        _filter: filterMessages.length ? filterMessages.join('\n') : false
+                                        _failure: 'yes',
+                                        _err_code: response.error.code
                                     });
                                     plugin.loginfo(
                                         'DEFERRED rcpt=' + recipient + ' user=' + userData.address + '[' + userData._id + '] error=' + response.error.message,
