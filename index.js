@@ -75,6 +75,7 @@ exports.open_database = function(server, next) {
             };
         }
         message = message || {};
+        message.facility = 'mx';
         message.host = plugin.hostname;
         message.timestamp = Date.now() / 1000;
         plugin.gelf.emit('gelf.log', message);
@@ -160,7 +161,7 @@ exports.hook_mail = function(next, connection, params) {
         .join('');
 
     plugin.loggelf({
-        short_message: 'MAIL FROM',
+        short_message: 'MX SMTP MAIL FROM',
 
         _mail_action: 'mail_from',
         _from: connection.transaction.notes.sender,
@@ -191,7 +192,7 @@ exports.hook_rcpt = function(next, connection, params) {
     let hookDone = (...args) => {
         if (resolution) {
             let message = {
-                short_message: 'RCPT TO',
+                short_message: 'MX SMTP RCPT TO',
                 _mail_action: 'rpt_to',
                 _to: rcpt.address(),
                 _queue_id: connection.transaction.uuid,
@@ -354,7 +355,7 @@ exports.hook_rcpt = function(next, connection, params) {
                     if (pos >= addressData.targets.length) {
                         resolution = {
                             _forward: 'yes',
-                            _resolved: forwardTargets.join(' ')
+                            _resolved: forwardTargets.join('\n')
                         };
                         return hookDone(OK);
                     }
@@ -648,11 +649,11 @@ exports.hook_queue = function(next, connection) {
         if (resolution) {
             let messageId = connection.transaction.header.get_all('Message-Id');
             let message = {
-                short_message: 'Message result',
+                short_message: 'MX SMTP DATA result',
                 _mail_action: 'data',
                 _queue_id: connection.transaction.uuid,
                 _message_id: (messageId[0] || '').toString().replace(/^[\s<]+|[\s>]+$/g, ''),
-                _score: plugin.cfg.spamScore,
+                _spam_score: plugin.cfg.spamScore,
                 _mail_from: connection.transaction.notes.sender
             };
 
@@ -751,7 +752,7 @@ exports.hook_queue = function(next, connection) {
                 short_message: 'Queued forward',
                 _mail_action: 'forward',
                 _target_queue_id: args[0].id,
-                _target_address: (targets || []).map(target => ((target && target.value) || target).toString().replace(/\?.*$/, '')).join(' ')
+                _target_address: (targets || []).map(target => ((target && target.value) || target).toString().replace(/\?.*$/, '')).join('\n')
             });
 
             plugin.loginfo('QUEUED FORWARD queue-id=' + args[0].id, plugin, connection);
@@ -961,6 +962,30 @@ exports.hook_queue = function(next, connection) {
                             let filterMessages = [];
                             if (response && response.filterResults && response.filterResults.length) {
                                 response.filterResults.forEach(entry => {
+                                    if (entry.forward) {
+                                        sendLogEntry({
+                                            short_message: 'Queued forward',
+                                            _user: userData._id.toString(),
+                                            _address: recipient,
+                                            _mail_action: 'forward',
+                                            _target_queue_id: entry['forward-queue-id'],
+                                            _target_address: entry.forward
+                                        });
+                                        return;
+                                    }
+
+                                    if (entry.autoreply) {
+                                        sendLogEntry({
+                                            short_message: 'Queued autoreply',
+                                            _mail_action: 'autoreply',
+                                            _user: userData._id.toString(),
+                                            _address: recipient,
+                                            _target_queue_id: entry['autoreply-queue-id'],
+                                            _target_address: entry.autoreply
+                                        });
+                                        return;
+                                    }
+
                                     Object.keys(entry).forEach(key => {
                                         if (!entry[key]) {
                                             return;
@@ -973,7 +998,7 @@ exports.hook_queue = function(next, connection) {
                                     });
                                 });
                                 if (filterMessages.length) {
-                                    plugin.loginfo('FILTER ACTIONS ' + filterMessages.join(' '), plugin, connection);
+                                    plugin.loginfo('FILTER ACTIONS ' + filterMessages.join(','), plugin, connection);
                                 }
                             }
 
@@ -986,7 +1011,7 @@ exports.hook_queue = function(next, connection) {
                                         _address: recipient,
                                         _dropped: 'yes',
                                         _error: 'message dropped',
-                                        _filter: filterMessages.length ? filterMessages.join(' ') : false
+                                        _filter: filterMessages.length ? filterMessages.join('\n') : false
                                     });
                                     plugin.loginfo(
                                         'DROPPED rcpt=' + recipient + ' user=' + userData.address + '[' + userData._id + '] error=' + response.error.message,
@@ -1001,7 +1026,7 @@ exports.hook_queue = function(next, connection) {
                                         _address: recipient,
                                         _failed: 'yes',
                                         _error: 'failed to store message',
-                                        _filter: filterMessages.length ? filterMessages.join(' ') : false
+                                        _filter: filterMessages.length ? filterMessages.join('\n') : false
                                     });
                                     plugin.loginfo(
                                         'DEFERRED rcpt=' + recipient + ' user=' + userData.address + '[' + userData._id + '] error=' + response.error.message,
@@ -1018,7 +1043,7 @@ exports.hook_queue = function(next, connection) {
                                 _address: recipient,
                                 _stored: 'yes',
                                 _result: response.response,
-                                _filter: filterMessages.length ? filterMessages.join(' ') : false
+                                _filter: filterMessages.length ? filterMessages.join('\n') : false
                             });
 
                             plugin.loginfo(
