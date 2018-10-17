@@ -161,7 +161,7 @@ exports.hook_mail = function(next, connection, params) {
         .join('');
 
     plugin.loggelf({
-        short_message: 'MX SMTP MAIL FROM',
+        short_message: 'MX SMTP [MAIL FROM:' + connection.transaction.notes.sender + '] ' + connection.transaction.uuid,
 
         _mail_action: 'mail_from',
         _from: connection.transaction.notes.sender,
@@ -192,7 +192,7 @@ exports.hook_rcpt = function(next, connection, params) {
     let hookDone = (...args) => {
         if (resolution) {
             let message = {
-                short_message: 'MX SMTP RCPT TO',
+                short_message: 'MX SMTP [RCPT TO:' + rcpt.address() + '] ' + connection.transaction.uuid,
                 _mail_action: 'rpt_to',
                 _to: rcpt.address(),
                 _queue_id: connection.transaction.uuid,
@@ -649,7 +649,7 @@ exports.hook_queue = function(next, connection) {
         if (resolution) {
             let messageId = connection.transaction.header.get_all('Message-Id');
             let message = {
-                short_message: 'MX SMTP DATA result',
+                short_message: 'MX SMTP [DATA] ' + connection.transaction.uuid,
                 _mail_action: 'data',
                 _queue_id: connection.transaction.uuid,
                 _message_id: (messageId[0] || '').toString().replace(/^[\s<]+|[\s>]+$/g, ''),
@@ -749,7 +749,7 @@ exports.hook_queue = function(next, connection) {
             }
 
             sendLogEntry({
-                short_message: 'Queued forward',
+                short_message: 'MX SMTP [Queued forward] ' + connection.transaction.uuid,
                 _mail_action: 'forward',
                 _target_queue_id: args[0].id,
                 _target_address: (targets || []).map(target => ((target && target.value) || target).toString().replace(/\?.*$/, '')).join('\n')
@@ -844,7 +844,7 @@ exports.hook_queue = function(next, connection) {
                     }
 
                     sendLogEntry({
-                        short_message: 'Queued autoreply',
+                        short_message: 'MX SMTP [Queued autoreply] ' + connection.transaction.uuid,
                         _mail_action: 'autoreply',
                         _target_queue_id: args[0].id,
                         _target_address: addressData.address
@@ -964,7 +964,7 @@ exports.hook_queue = function(next, connection) {
                                 response.filterResults.forEach(entry => {
                                     if (entry.forward) {
                                         sendLogEntry({
-                                            short_message: 'Queued forward',
+                                            short_message: 'MX SMTP [Queued forward] ' + connection.transaction.uuid,
                                             _user: userData._id.toString(),
                                             _address: recipient,
                                             _mail_action: 'forward',
@@ -976,7 +976,7 @@ exports.hook_queue = function(next, connection) {
 
                                     if (entry.autoreply) {
                                         sendLogEntry({
-                                            short_message: 'Queued autoreply',
+                                            short_message: 'MX SMTP [Queued autoreply] ' + connection.transaction.uuid,
                                             _mail_action: 'autoreply',
                                             _user: userData._id.toString(),
                                             _address: recipient,
