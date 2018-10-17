@@ -67,6 +67,7 @@ exports.open_database = function(server, next) {
                   // placeholder
                   emit: () => false
               };
+
     plugin.loggelf = message => {
         if (typeof message === 'string') {
             message = {
@@ -105,7 +106,8 @@ exports.open_database = function(server, next) {
                 messageHandler: plugin.db.messageHandler,
                 spamChecks,
                 spamHeaderKeys: spamChecks && spamChecks.map(check => check.key),
-                spamScoreValue: plugin.cfg.spamScore
+                spamScoreValue: plugin.cfg.spamScore,
+                loggelf: message => plugin.loggelf(message)
             });
 
             plugin.loginfo('Database connection opened', plugin);
@@ -137,6 +139,8 @@ exports.init_wildduck_shared = function(next, server) {
 };
 
 exports.hook_mail = function(next, connection, params) {
+    let plugin = this;
+
     let from = params[0];
     connection.transaction.notes.sender = from.address();
 
@@ -144,7 +148,7 @@ exports.hook_mail = function(next, connection, params) {
     connection.transaction.notes.rateKeys = [];
     connection.transaction.notes.targets = {
         users: new Map(),
-        forward: new Map(),
+        forwards: new Map(),
         recipients: new Set(),
         autoreplies: new Map()
     };
@@ -155,11 +159,23 @@ exports.hook_mail = function(next, connection, params) {
         .concat(connection.tls_cipher ? 'S' : [])
         .join('');
 
+    plugin.loggelf({
+        short_message: 'MAIL FROM',
+
+        _mail_action: 'mail_from',
+        _from: connection.transaction.notes.sender,
+        _queue_id: connection.transaction.uuid,
+        _ip: connection.remote_ip,
+        _proto: connection.transaction.notes.transmissionType
+    });
+
     return next();
 };
 
 exports.hook_rcpt = function(next, connection, params) {
     let plugin = this;
+
+    const { recipients, forwards, autoreplies, users } = connection.transaction.notes.targets;
 
     let rcpt = params[0];
     if (/\*/.test(rcpt.user)) {
@@ -169,7 +185,30 @@ exports.hook_rcpt = function(next, connection, params) {
 
     let address = plugin.normalize_address(rcpt);
 
-    connection.transaction.notes.targets.recipients.add(address);
+    recipients.add(address);
+
+    let resolution = false;
+    let hookDone = (...args) => {
+        if (resolution) {
+            let message = {
+                short_message: 'RCPT TO',
+                _mail_action: 'rpt_to',
+                _to: rcpt.address(),
+                _queue_id: connection.transaction.uuid,
+                _ip: connection.remote_ip,
+                _proto: connection.transaction.notes.transmissionType
+            };
+
+            Object.keys(resolution).forEach(key => {
+                if (resolution[key]) {
+                    message[key] = resolution[key];
+                }
+            });
+
+            plugin.loggelf(message);
+        }
+        next(...args);
+    };
 
     plugin.logdebug('Checking validity of ' + address, plugin, connection);
 
@@ -186,13 +225,23 @@ exports.hook_rcpt = function(next, connection, params) {
 
             if (!toDomain) {
                 plugin.logerror('SRS FAILED rcpt=' + address + ' error=Missing domain', plugin, connection);
-                return next(DENY, DSN.no_such_user());
+                resolution = {
+                    _srs: 'yes',
+                    _error: 'missing domain'
+                };
+                return hookDone(DENY, DSN.no_such_user());
             }
 
             reversed = reversed.join('@');
-        } catch (E) {
-            plugin.logerror('SRS FAILED rcpt=' + address + ' error=' + E.message, plugin, connection);
-            return next(DENY, DSN.no_such_user());
+        } catch (err) {
+            plugin.logerror('SRS FAILED rcpt=' + address + ' error=' + err.message, plugin, connection);
+            resolution = {
+                full_message: err.stack,
+                _srs: 'yes',
+                _error: 'srs check failed',
+                _err_code: err.code
+            };
+            return hookDone(DENY, DSN.no_such_user());
         }
 
         if (reversed) {
@@ -201,11 +250,25 @@ exports.hook_rcpt = function(next, connection, params) {
             let selector = 'rcpt';
             return plugin.checkRateLimit(connection, selector, key, false, (err, success) => {
                 if (err) {
-                    return next(err);
+                    resolution = {
+                        full_message: err.stack,
+                        _srs: 'yes',
+                        _rate_limit: 'yes',
+                        _selector: selector,
+                        _error: 'rate limit check failed',
+                        _err_code: err.code
+                    };
+                    return hookDone(err);
                 }
 
                 if (!success) {
-                    return next(DENYSOFT, DSN.rcpt_too_fast());
+                    resolution = {
+                        _srs: 'yes',
+                        _rate_limit: 'yes',
+                        _selector: selector,
+                        _error: 'too many attempts'
+                    };
+                    return hookDone(DENYSOFT, DSN.rcpt_too_fast());
                 }
 
                 // update rate limit for this address after delivery
@@ -213,8 +276,13 @@ exports.hook_rcpt = function(next, connection, params) {
 
                 plugin.loginfo('SRS USING rcpt=' + address + ' target=' + reversed, plugin, connection);
 
-                connection.transaction.notes.targets.forward.set(reversed, { type: 'mail', value: reversed });
-                return next(OK);
+                forwards.set(reversed, { type: 'mail', value: reversed });
+
+                resolution = {
+                    _srs: 'yes',
+                    _resolved: reversed
+                };
+                return hookDone(OK);
             });
         }
     }
@@ -228,7 +296,15 @@ exports.hook_rcpt = function(next, connection, params) {
             (err, result) => {
                 if (err) {
                     // failed checks
-                    return next(err);
+                    resolution = {
+                        full_message: err.stack,
+                        _forward: 'yes',
+                        _rate_limit: 'yes',
+                        _selector: 'user',
+                        _error: 'rate limit check failed',
+                        _err_code: err.code
+                    };
+                    return hookDone(err);
                 } else if (!result.success) {
                     connection.lognotice(
                         'RATELIMITED target=' +
@@ -244,7 +320,14 @@ exports.hook_rcpt = function(next, connection, params) {
                         plugin,
                         connection
                     );
-                    return next(DENYSOFT, DSN.rcpt_too_fast());
+
+                    resolution = {
+                        _forward: 'yes',
+                        _rate_limit: 'yes',
+                        _selector: 'user',
+                        _error: 'too many attempts'
+                    };
+                    return hookDone(DENYSOFT, DSN.rcpt_too_fast());
                 }
 
                 plugin.loginfo(
@@ -262,45 +345,56 @@ exports.hook_rcpt = function(next, connection, params) {
                 );
 
                 if (addressData.autoreply) {
-                    connection.transaction.notes.targets.autoreplies.set(addressData.addrview, addressData);
+                    autoreplies.set(addressData.addrview, addressData);
                 }
 
+                let forwardTargets = [];
                 let pos = 0;
                 let processTarget = () => {
                     if (pos >= addressData.targets.length) {
-                        return next(OK);
+                        resolution = {
+                            _forward: 'yes',
+                            _resolved: forwardTargets.join(' ')
+                        };
+                        return hookDone(OK);
                     }
 
-                    let target = addressData.targets[pos++];
+                    let targetData = addressData.targets[pos++];
 
-                    if (target.type === 'relay') {
+                    if (targetData.type === 'relay') {
                         // relay is not rate limited
-                        target.recipient = rcpt.address();
-                        connection.transaction.notes.targets.forward.set(target.value, target);
+                        targetData.recipient = rcpt.address();
+                        forwards.set(targetData.value, targetData);
+
+                        forwardTargets.push(rcpt.address() + ':' + (targetData.value || '').toString().replace(/\?.*$/, ''));
                         return setImmediate(processTarget);
                     }
 
-                    if (target.type === 'http' || (target.type === 'mail' && !target.user)) {
-                        if (target.type !== 'mail') {
-                            target.recipient = rcpt.address();
+                    if (targetData.type === 'http' || (targetData.type === 'mail' && !targetData.user)) {
+                        if (targetData.type !== 'mail') {
+                            forwardTargets.push(rcpt.address() + ':' + targetData.value);
+                            targetData.recipient = rcpt.address();
+                        } else {
+                            forwardTargets.push(rcpt.address());
                         }
 
-                        connection.transaction.notes.targets.forward.set(target.value, target);
+                        forwards.set(targetData.value, targetData);
                         return setImmediate(processTarget);
                     }
 
-                    if (target.type !== 'mail') {
+                    if (targetData.type !== 'mail') {
                         // no idea what to do here, some new feature probably
                         return setImmediate(processTarget);
                     }
 
-                    if (connection.transaction.notes.targets.users.has(target.user.toString())) {
+                    if (targetData.user && users.has(targetData.user.toString())) {
+                        // already listed as a recipient
                         return setImmediate(processTarget);
                     }
 
                     // we have a target user, so we need to resolve user data
                     plugin.db.users.collection('users').findOne(
-                        { _id: target.user },
+                        { _id: targetData.user },
                         {
                             // extra fields are needed later in the filtering step
                             projection: {
@@ -321,22 +415,44 @@ exports.hook_rcpt = function(next, connection, params) {
                         (err, userData) => {
                             if (err) {
                                 err.code = 'InternalDatabaseError';
-                                return next(err);
+                                resolution = {
+                                    full_message: err.stack,
+                                    _collection: 'users',
+                                    _db_query: '_id:' + targetData.user,
+                                    _err_code: err.code
+                                };
+                                return hookDone(err);
                             }
 
-                            if (!userData || userData.disabled) {
+                            if (!userData) {
+                                // unknown user, treat as normal forward
+                                targetData.recipient = rcpt.address();
+                                forwards.set(targetData.value, targetData);
+                                forwardTargets.push(rcpt.address());
+                                return setImmediate(processTarget);
+                            }
+
+                            if (userData.disabled) {
+                                // disabled user, skip
+                                forwardTargets.push(rcpt.address() + ':disabled');
                                 return setImmediate(processTarget);
                             }
 
                             // max quota for the user
                             let quota = userData.quota || consts.MAX_STORAGE;
-
                             if (userData.storageUsed && quota <= userData.storageUsed) {
-                                // can not deliver mail to this user, over quota
+                                // can not deliver mail to this user, over quota, skip
+                                forwardTargets.push(rcpt.address() + ':over_quota');
                                 return setImmediate(processTarget);
                             }
 
-                            connection.transaction.notes.targets.users.set(userData._id.toString(), { user: userData, recipient: rcpt.address() });
+                            users.set(userData._id.toString(), {
+                                userData,
+                                recipient: rcpt.address()
+                            });
+
+                            forwardTargets.push(rcpt.address() + ':' + userData._id);
+
                             setImmediate(processTarget);
                         }
                     );
@@ -349,10 +465,25 @@ exports.hook_rcpt = function(next, connection, params) {
 
     plugin.db.userHandler.resolveAddress(
         address,
-        { wildcard: true, projection: { name: true, address: true, addrview: true, autoreply: true } },
+        {
+            wildcard: true,
+            projection: {
+                name: true,
+                address: true,
+                addrview: true,
+                autoreply: true,
+                targets: true // only forwarded address has `targets` set
+            }
+        },
         (err, addressData) => {
             if (err) {
-                return next(err);
+                resolution = {
+                    full_message: err.stack,
+                    _api: 'resolveAddress',
+                    _db_query: 'address:' + address,
+                    _err_code: err.code
+                };
+                return hookDone(err);
             }
 
             if (addressData && addressData.targets) {
@@ -361,7 +492,11 @@ exports.hook_rcpt = function(next, connection, params) {
 
             if (!addressData || !addressData.user) {
                 plugin.logdebug('No such user ' + address, plugin, connection);
-                return next(DENY, DSN.no_such_user());
+                resolution = {
+                    _error: 'no such user',
+                    _unknwon_user: 'yes'
+                };
+                return hookDone(DENY, DSN.no_such_user());
             }
 
             plugin.db.userHandler.get(
@@ -382,16 +517,31 @@ exports.hook_rcpt = function(next, connection, params) {
                 },
                 (err, userData) => {
                     if (err) {
-                        return next(err);
+                        resolution = {
+                            full_message: err.stack,
+                            _api: 'getUser',
+                            _db_query: 'user:' + addressData.user,
+                            _err_code: err.code
+                        };
+                        return hookDone(err);
                     }
 
                     if (!userData) {
-                        return next(DENY, DSN.no_such_user());
+                        resolution = {
+                            _error: 'no such user',
+                            _unknwon_user: 'yes'
+                        };
+                        return hookDone(DENY, DSN.no_such_user());
                     }
 
                     if (userData.disabled) {
                         // user is disabled for whatever reason
-                        return next(DENY, DSN.mbox_disabled());
+                        resolution = {
+                            _user: userData._id.toString(),
+                            _error: 'disabled user',
+                            _disabled_user: 'yes'
+                        };
+                        return hookDone(DENY, DSN.mbox_disabled());
                     }
 
                     // max quota for the user
@@ -399,7 +549,12 @@ exports.hook_rcpt = function(next, connection, params) {
 
                     if (userData.storageUsed && quota <= userData.storageUsed) {
                         // can not deliver mail to this user, over quota
-                        return next(DENY, DSN.mbox_full());
+                        resolution = {
+                            _user: userData._id.toString(),
+                            _error: 'user over quota',
+                            _over_quota: 'yes'
+                        };
+                        return hookDone(DENY, DSN.mbox_full());
                     }
 
                     let checkIpRateLimit = done => {
@@ -411,11 +566,23 @@ exports.hook_rcpt = function(next, connection, params) {
                         let selector = 'rcptIp';
                         plugin.checkRateLimit(connection, selector, key, false, (err, success) => {
                             if (err) {
-                                return next(err);
+                                resolution = {
+                                    full_message: err.stack,
+                                    _rate_limit: 'yes',
+                                    _selector: selector,
+                                    _error: 'rate limit check failed',
+                                    _err_code: err.code
+                                };
+                                return hookDone(err);
                             }
 
                             if (!success) {
-                                return next(DENYSOFT, DSN.rcpt_too_fast());
+                                resolution = {
+                                    _rate_limit: 'yes',
+                                    _selector: selector,
+                                    _error: 'too many attempts'
+                                };
+                                return hookDone(DENYSOFT, DSN.rcpt_too_fast());
                             }
 
                             // update rate limit for this address after delivery
@@ -430,11 +597,23 @@ exports.hook_rcpt = function(next, connection, params) {
                         let selector = 'rcpt';
                         plugin.checkRateLimit(connection, selector, key, userData.receivedMax, (err, success) => {
                             if (err) {
-                                return next(err);
+                                resolution = {
+                                    full_message: err.stack,
+                                    _rate_limit: 'yes',
+                                    _selector: selector,
+                                    _error: 'rate limit check failed',
+                                    _err_code: err.code
+                                };
+                                return hookDone(err);
                             }
 
                             if (!success) {
-                                return next(DENYSOFT, DSN.rcpt_too_fast());
+                                resolution = {
+                                    _rate_limit: 'yes',
+                                    _selector: selector,
+                                    _error: 'too many attempts'
+                                };
+                                return hookDone(DENYSOFT, DSN.rcpt_too_fast());
                             }
 
                             plugin.loginfo('RESOLVED rcpt=' + rcpt.address() + ' user=' + userData.address + '[' + userData._id + ']', plugin, connection);
@@ -442,8 +621,16 @@ exports.hook_rcpt = function(next, connection, params) {
                             // update rate limit for this address after delivery
                             connection.transaction.notes.rateKeys.push({ selector, key, limit: userData.receivedMax });
 
-                            connection.transaction.notes.targets.users.set(userData._id.toString(), { user: userData, recipient: rcpt.address() });
-                            return next(OK);
+                            users.set(userData._id.toString(), {
+                                userData,
+                                recipient: rcpt.address()
+                            });
+
+                            resolution = {
+                                _user: userData._id.toString(),
+                                _resolved: rcpt.address()
+                            };
+                            return hookDone(OK);
                         });
                     });
                 }
@@ -455,6 +642,30 @@ exports.hook_rcpt = function(next, connection, params) {
 exports.hook_queue = function(next, connection) {
     let plugin = this;
 
+    const { recipients, forwards, autoreplies, users } = connection.transaction.notes.targets;
+
+    let sendLogEntry = resolution => {
+        if (resolution) {
+            let messageId = connection.transaction.header.get_all('Message-Id');
+            let message = {
+                short_message: 'Message result',
+                _mail_action: 'data',
+                _queue_id: connection.transaction.uuid,
+                _message_id: (messageId[0] || '').toString().replace(/^[\s<]+|[\s>]+$/g, ''),
+                _score: plugin.cfg.spamScore,
+                _mail_from: connection.transaction.notes.sender
+            };
+
+            Object.keys(resolution).forEach(key => {
+                if (resolution[key]) {
+                    message[key] = resolution[key];
+                }
+            });
+
+            plugin.loggelf(message);
+        }
+    };
+
     let collector = new StreamCollect();
 
     let collectData = done => {
@@ -465,6 +676,11 @@ exports.hook_queue = function(next, connection) {
 
         collector.once('error', err => {
             plugin.logerror('PIPEFAIL error=' + err.message, plugin, connection);
+            sendLogEntry({
+                full_message: err.stack,
+                _err_code: err.code,
+                _error: 'pipefail processing input'
+            });
             return next(DENYSOFT, 'Failed to Queue message');
         });
 
@@ -472,7 +688,7 @@ exports.hook_queue = function(next, connection) {
     };
 
     let forwardMessage = done => {
-        if (!connection.transaction.notes.targets.forward.size) {
+        if (!forwards.size) {
             // the message does not need forwarding at this point
             return collectData(done);
         }
@@ -488,7 +704,7 @@ exports.hook_queue = function(next, connection) {
                     queueId: connection.transaction.uuid,
                     action: 'FORWARDSKIP',
                     from: connection.transaction.notes.sender,
-                    to: Array.from(connection.transaction.notes.targets.recipients),
+                    to: Array.from(recipients),
                     score: rspamd.score,
                     created: new Date()
                 },
@@ -497,8 +713,8 @@ exports.hook_queue = function(next, connection) {
         }
 
         let targets =
-            (connection.transaction.notes.targets.forward.size &&
-                Array.from(connection.transaction.notes.targets.forward).map(row => ({
+            (forwards.size &&
+                Array.from(forwards).map(row => ({
                     type: row[1].type,
                     value: row[1].value,
                     recipient: row[1].recipient
@@ -521,10 +737,22 @@ exports.hook_queue = function(next, connection) {
             if (err || !args[0]) {
                 if (err) {
                     err.code = err.code || 'ERRCOMPOSE';
+                    sendLogEntry({
+                        full_message: err.stack,
+                        _err_code: err.code,
+                        _error: 'failed to store message'
+                    });
                     return next(DENYSOFT, 'Failed to Queue message');
                 }
                 return done(err, ...args);
             }
+
+            sendLogEntry({
+                short_message: 'Queued forward',
+                _mail_action: 'forward',
+                _target_queue_id: args[0].id,
+                _target_address: (targets || []).map(target => ((target && target.value) || target).toString().replace(/\?.*$/, '')).join(' ')
+            });
 
             plugin.loginfo('QUEUED FORWARD queue-id=' + args[0].id, plugin, connection);
 
@@ -535,7 +763,7 @@ exports.hook_queue = function(next, connection) {
                     queueId: connection.transaction.uuid,
                     action: 'FORWARD',
                     from: connection.transaction.notes.sender,
-                    to: Array.from(connection.transaction.notes.targets.recipients),
+                    to: Array.from(recipients),
                     targets,
                     created: new Date()
                 },
@@ -547,6 +775,11 @@ exports.hook_queue = function(next, connection) {
             connection.transaction.message_stream.once('error', err => message.emit('error', err));
             message.once('error', err => {
                 plugin.logerror('QUEUEERROR Failed to retrieve message. error=' + err.message, plugin, connection);
+                sendLogEntry({
+                    full_message: err.stack,
+                    _err_code: err.code,
+                    _error: 'failed to retrieve message from input'
+                });
                 return next(DENYSOFT, 'Failed to Queue message');
             });
 
@@ -556,14 +789,14 @@ exports.hook_queue = function(next, connection) {
     };
 
     let sendAutoreplies = done => {
-        if (!connection.transaction.notes.targets.autoreplies.size) {
+        if (!autoreplies.size) {
             return done();
         }
         // TODO: send autoreply messages
 
         let curtime = new Date();
         let pos = 0;
-        let targets = Array.from(connection.transaction.notes.targets.autoreplies);
+        let targets = Array.from(autoreplies);
         let processNext = () => {
             if (pos >= targets.length) {
                 return done();
@@ -609,6 +842,13 @@ exports.hook_queue = function(next, connection) {
                         return done(err, ...args);
                     }
 
+                    sendLogEntry({
+                        short_message: 'Queued autoreply',
+                        _mail_action: 'autoreply',
+                        _target_queue_id: args[0].id,
+                        _target_address: addressData.address
+                    });
+
                     plugin.loginfo('QUEUED AUTOREPLY target=' + connection.transaction.notes.sender + ' queue-id=' + args[0].id, plugin, connection);
                     return done(err, ...args);
                 }
@@ -642,7 +882,7 @@ exports.hook_queue = function(next, connection) {
                 queueId: connection.transaction.uuid,
                 action: 'MX',
                 from: connection.transaction.notes.sender,
-                to: Array.from(connection.transaction.notes.targets.recipients),
+                to: Array.from(recipients),
                 score: rspamd && rspamd.score,
                 created: new Date()
             },
@@ -657,17 +897,17 @@ exports.hook_queue = function(next, connection) {
             sendAutoreplies(() => {
                 let prepared = false;
 
-                let users = Array.from(connection.transaction.notes.targets.users).map(e => e[1]);
+                let userList = Array.from(users).map(e => e[1]);
                 let stored = 0;
 
                 let storeNext = () => {
-                    if (stored >= users.length) {
+                    if (stored >= userList.length) {
                         return updateRateLimits(() => next(OK, 'Message processed'));
                     }
 
-                    let rcptData = users[stored++];
+                    let rcptData = userList[stored++];
                     let recipient = rcptData.recipient;
-                    let userData = rcptData.user;
+                    let userData = rcptData.userData;
 
                     plugin.logdebug(plugin, 'Filtering message for ' + recipient, plugin, connection);
                     plugin.filterHandler.process(
@@ -702,39 +942,67 @@ exports.hook_queue = function(next, connection) {
                                     },
                                     () => false
                                 );
+
+                                sendLogEntry({
+                                    full_message: err.stack,
+                                    _err_code: err.code,
+                                    _user: userData._id.toString(),
+                                    _address: recipient,
+                                    _failed: 'yes',
+                                    _error: 'failed to store message'
+                                });
+
                                 // we can fail the message even if some recipients were already processed
                                 // as redelivery would not be a problem - duplicate deliveries are ignored (filters are rerun though).
                                 plugin.loginfo('DEFERRED rcpt=' + recipient + ' error=' + err.message, plugin, connection);
                                 return next(DENYSOFT, 'Failed to Queue message');
                             }
 
+                            let filterMessages = [];
                             if (response && response.filterResults && response.filterResults.length) {
-                                let msg = [];
                                 response.filterResults.forEach(entry => {
                                     Object.keys(entry).forEach(key => {
                                         if (!entry[key]) {
                                             return;
                                         }
                                         if (typeof entry[key] === 'boolean') {
-                                            msg.push(key);
+                                            filterMessages.push(key);
                                         } else {
-                                            msg.push(key + '=' + (entry[key] || '').toString());
+                                            filterMessages.push(key + '=' + (entry[key] || '').toString());
                                         }
                                     });
                                 });
-                                if (msg.length) {
-                                    plugin.loginfo('FILTER ACTIONS ' + msg.join(' '), plugin, connection);
+                                if (filterMessages.length) {
+                                    plugin.loginfo('FILTER ACTIONS ' + filterMessages.join(' '), plugin, connection);
                                 }
                             }
 
                             if (response && response.error) {
                                 if (response.error.code === 'DroppedByPolicy') {
+                                    sendLogEntry({
+                                        full_message: response.error.message,
+                                        _err_code: response.error.code,
+                                        _user: userData._id.toString(),
+                                        _address: recipient,
+                                        _dropped: 'yes',
+                                        _error: 'message dropped',
+                                        _filter: filterMessages.length ? filterMessages.join(' ') : false
+                                    });
                                     plugin.loginfo(
                                         'DROPPED rcpt=' + recipient + ' user=' + userData.address + '[' + userData._id + '] error=' + response.error.message,
                                         plugin,
                                         connection
                                     );
                                 } else {
+                                    sendLogEntry({
+                                        full_message: response.error.stack,
+                                        _err_code: response.error.code,
+                                        _user: userData._id.toString(),
+                                        _address: recipient,
+                                        _failed: 'yes',
+                                        _error: 'failed to store message',
+                                        _filter: filterMessages.length ? filterMessages.join(' ') : false
+                                    });
                                     plugin.loginfo(
                                         'DEFERRED rcpt=' + recipient + ' user=' + userData.address + '[' + userData._id + '] error=' + response.error.message,
                                         plugin,
@@ -745,25 +1013,19 @@ exports.hook_queue = function(next, connection) {
                                 return next(response.error.code === 'DroppedByPolicy' ? DENY : DENYSOFT, response.error.message);
                             }
 
+                            sendLogEntry({
+                                _user: userData._id.toString(),
+                                _address: recipient,
+                                _stored: 'yes',
+                                _result: response.response,
+                                _filter: filterMessages.length ? filterMessages.join(' ') : false
+                            });
+
                             plugin.loginfo(
                                 'STORED rcpt=' + recipient + ' user=' + userData.address + '[' + userData._id + '] result=' + response.response,
                                 plugin,
                                 connection
                             );
-
-                            let messageId = connection.transaction.header.get_all('Message-Id');
-
-                            plugin.loggelf({
-                                short_message: 'Stored email',
-                                _queue: connection.transaction.uuid,
-                                _remote_address: connection.remote_ip,
-                                _user: userData._id.toString(),
-                                _mail_from: connection.transaction.notes.sender,
-                                _rcpt_to: recipient,
-                                _message_id: messageId[0],
-                                _score: plugin.cfg.spamScore,
-                                _response: response.response
-                            });
 
                             if (!prepared && preparedResponse) {
                                 // reuse parsed message structure
