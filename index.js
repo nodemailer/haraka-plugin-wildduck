@@ -785,12 +785,12 @@ exports.hook_queue = function(next, connection) {
                 _target_address: (targets || []).map(target => ((target && target.value) || target).toString().replace(/\?.*$/, '')).join('\n')
             });
 
-            sendLogEntry({
+            plugin.loggelf({
                 _queue_id: args[0].id,
 
                 short_message: 'MX SMTP [QUEUED] ' + args[0].id,
 
-                _source_id: connection.transaction.uuid,
+                _parent_id: connection.transaction.uuid,
                 _from: connection.transaction.notes.sender,
                 _to: (targets || []).map(target => ((target && target.value) || target).toString().replace(/\?.*$/, '')).join('\n'),
 
@@ -897,12 +897,12 @@ exports.hook_queue = function(next, connection) {
                         _target_address: addressData.address
                     });
 
-                    sendLogEntry({
+                    plugin.loggelf({
                         _queue_id: args[0].id,
 
                         short_message: 'MX SMTP [QUEUED] ' + args[0].id,
 
-                        _source_id: connection.transaction.uuid,
+                        _parent_id: connection.transaction.uuid,
                         _from: addressData.address,
                         _to: addressData.address,
 
@@ -1038,12 +1038,12 @@ exports.hook_queue = function(next, connection) {
                                             _target_address: entry.forward
                                         });
 
-                                        sendLogEntry({
-                                            _queue_id: entry['autoreply-queue-id'],
+                                        plugin.loggelf({
+                                            _queue_id: entry['forward-queue-id'],
 
-                                            short_message: 'MX SMTP [QUEUED] ' + entry['autoreply-queue-id'],
+                                            short_message: 'MX SMTP [QUEUED] ' + entry['forward-queue-id'],
 
-                                            _source_id: connection.transaction.uuid,
+                                            _parent_id: connection.transaction.uuid,
                                             _from: recipient,
                                             _to: entry.forward,
 
@@ -1065,12 +1065,12 @@ exports.hook_queue = function(next, connection) {
                                             _target_address: entry.autoreply
                                         });
 
-                                        sendLogEntry({
+                                        plugin.loggelf({
                                             _queue_id: entry['autoreply-queue-id'],
 
                                             short_message: 'MX SMTP [QUEUED] ' + entry['autoreply-queue-id'],
 
-                                            _source_id: connection.transaction.uuid,
+                                            _parent_id: connection.transaction.uuid,
                                             _from: recipient,
                                             _to: entry.autoreply,
 
