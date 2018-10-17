@@ -79,6 +79,12 @@ exports.open_database = function(server, next) {
         message.host = plugin.hostname;
         message.timestamp = Date.now() / 1000;
         message._component = 'mx';
+
+        Object.keys(message).forEach(key => {
+            if (!message[key]) {
+                delete message[key];
+            }
+        });
         plugin.gelf.emit('gelf.log', message);
     };
 
@@ -779,6 +785,21 @@ exports.hook_queue = function(next, connection) {
                 _target_address: (targets || []).map(target => ((target && target.value) || target).toString().replace(/\?.*$/, '')).join('\n')
             });
 
+            sendLogEntry({
+                _queue_id: args[0].id,
+
+                short_message: 'MX SMTP [QUEUED] ' + args[0].id,
+
+                _source_id: connection.transaction.uuid,
+                _from: connection.transaction.notes.sender,
+                _to: (targets || []).map(target => ((target && target.value) || target).toString().replace(/\?.*$/, '')).join('\n'),
+
+                _queued: 'yes',
+                _forward: 'yes',
+
+                _interface: 'mx'
+            });
+
             plugin.loginfo('QUEUED FORWARD queue-id=' + args[0].id, plugin, connection);
 
             plugin.db.database.collection('messagelog').insertOne(
@@ -874,6 +895,21 @@ exports.hook_queue = function(next, connection) {
                         _mail_action: 'autoreply',
                         _target_queue_id: args[0].id,
                         _target_address: addressData.address
+                    });
+
+                    sendLogEntry({
+                        _queue_id: args[0].id,
+
+                        short_message: 'MX SMTP [QUEUED] ' + args[0].id,
+
+                        _source_id: connection.transaction.uuid,
+                        _from: addressData.address,
+                        _to: addressData.address,
+
+                        _queued: 'yes',
+                        _autoreply: 'yes',
+
+                        _interface: 'mx'
                     });
 
                     plugin.loginfo('QUEUED AUTOREPLY target=' + connection.transaction.notes.sender + ' queue-id=' + args[0].id, plugin, connection);
@@ -1001,6 +1037,21 @@ exports.hook_queue = function(next, connection) {
                                             _target_queue_id: entry['forward-queue-id'],
                                             _target_address: entry.forward
                                         });
+
+                                        sendLogEntry({
+                                            _queue_id: entry['autoreply-queue-id'],
+
+                                            short_message: 'MX SMTP [QUEUED] ' + entry['autoreply-queue-id'],
+
+                                            _source_id: connection.transaction.uuid,
+                                            _from: recipient,
+                                            _to: entry.forward,
+
+                                            _queued: 'yes',
+                                            _forward: 'yes',
+
+                                            _interface: 'mx'
+                                        });
                                         return;
                                     }
 
@@ -1012,6 +1063,21 @@ exports.hook_queue = function(next, connection) {
                                             _address: recipient,
                                             _target_queue_id: entry['autoreply-queue-id'],
                                             _target_address: entry.autoreply
+                                        });
+
+                                        sendLogEntry({
+                                            _queue_id: entry['autoreply-queue-id'],
+
+                                            short_message: 'MX SMTP [QUEUED] ' + entry['autoreply-queue-id'],
+
+                                            _source_id: connection.transaction.uuid,
+                                            _from: recipient,
+                                            _to: entry.autoreply,
+
+                                            _queued: 'yes',
+                                            _autoreply: 'yes',
+
+                                            _interface: 'mx'
                                         });
                                         return;
                                     }
