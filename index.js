@@ -976,6 +976,7 @@ exports.hook_queue = function(next, connection) {
                                     _user: userData._id.toString(),
                                     _address: recipient,
 
+                                    _no_store: 'yes',
                                     _error: 'failed to store message',
                                     _failure: 'yes',
                                     _err_code: err.code
@@ -987,6 +988,7 @@ exports.hook_queue = function(next, connection) {
                                 return next(DENYSOFT, 'Failed to Queue message');
                             }
 
+                            let isSpam = false;
                             let filterMessages = [];
                             if (response && response.filterResults && response.filterResults.length) {
                                 response.filterResults.forEach(entry => {
@@ -1014,6 +1016,11 @@ exports.hook_queue = function(next, connection) {
                                         return;
                                     }
 
+                                    if (entry.spam) {
+                                        isSpam = true;
+                                        return;
+                                    }
+
                                     Object.keys(entry).forEach(key => {
                                         if (!entry[key]) {
                                             return;
@@ -1038,7 +1045,9 @@ exports.hook_queue = function(next, connection) {
                                         _user: userData._id.toString(),
                                         _address: recipient,
                                         _filter: filterMessages.length ? filterMessages.join('\n') : false,
+                                        _is_spam: isSpam ? 'yes' : '',
 
+                                        _no_store: 'yes',
                                         _error: 'message dropped',
                                         _dropped: 'yes',
                                         _err_code: response.error.code
@@ -1055,7 +1064,9 @@ exports.hook_queue = function(next, connection) {
                                         _user: userData._id.toString(),
                                         _address: recipient,
                                         _filter: filterMessages.length ? filterMessages.join('\n') : false,
+                                        _is_spam: isSpam ? 'yes' : '',
 
+                                        _no_store: 'yes',
                                         _error: 'failed to store message',
                                         _failure: 'yes',
                                         _err_code: response.error.code
@@ -1075,7 +1086,8 @@ exports.hook_queue = function(next, connection) {
                                 _address: recipient,
                                 _stored: 'yes',
                                 _result: response.response,
-                                _filter: filterMessages.length ? filterMessages.join('\n') : false
+                                _filter: filterMessages.length ? filterMessages.join('\n') : false,
+                                _is_spam: isSpam ? 'yes' : ''
                             });
 
                             plugin.loginfo(
