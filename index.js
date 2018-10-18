@@ -674,12 +674,14 @@ exports.hook_queue = function(next, connection) {
     let sendLogEntry = resolution => {
         if (resolution) {
             let messageId = connection.transaction.header.get_all('Message-Id');
+            let rspamd = connection.transaction.results.get('rspamd');
+
             let message = {
                 short_message: 'MX SMTP [DATA] ' + connection.transaction.uuid,
                 _mail_action: 'data',
                 _queue_id: connection.transaction.uuid,
                 _message_id: (messageId[0] || '').toString().replace(/^[\s<]+|[\s>]+$/g, ''),
-                _spam_score: plugin.cfg.spamScore,
+                _spam_score: rspamd ? rspamd.score : '',
                 _mail_from: connection.transaction.notes.sender
             };
 
@@ -1111,7 +1113,7 @@ exports.hook_queue = function(next, connection) {
                                         _user: userData._id.toString(),
                                         _address: recipient,
                                         _filter: filterMessages.length ? filterMessages.join('\n') : false,
-                                        _is_spam: isSpam ? 'yes' : '',
+                                        _is_spam: isSpam ? 'yes' : 'no',
 
                                         _no_store: 'yes',
                                         _error: 'message dropped',
@@ -1130,7 +1132,7 @@ exports.hook_queue = function(next, connection) {
                                         _user: userData._id.toString(),
                                         _address: recipient,
                                         _filter: filterMessages.length ? filterMessages.join('\n') : false,
-                                        _is_spam: isSpam ? 'yes' : '',
+                                        _is_spam: isSpam ? 'yes' : 'no',
 
                                         _no_store: 'yes',
                                         _error: 'failed to store message',
@@ -1153,7 +1155,7 @@ exports.hook_queue = function(next, connection) {
                                 _stored: 'yes',
                                 _result: response.response,
                                 _filter: filterMessages.length ? filterMessages.join('\n') : false,
-                                _is_spam: isSpam ? 'yes' : ''
+                                _is_spam: isSpam ? 'yes' : 'no'
                             });
 
                             plugin.loginfo(
