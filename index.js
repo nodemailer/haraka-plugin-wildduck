@@ -729,6 +729,13 @@ exports.hook_queue = function(next, connection) {
             // do not forward spam messages
             plugin.loginfo('FORWARDSKIP score=' + JSON.stringify(rspamd.score) + ' required=' + plugin.cfg.spamScoreForwarding, plugin, connection);
 
+            sendLogEntry({
+                short_message: 'MX SMTP [Skip forward] ' + connection.transaction.uuid,
+                _mail_action: 'forward',
+                _spam_score: rspamd.score,
+                _spam_allowed: plugin.cfg.spamScoreForwarding
+            });
+
             return plugin.db.database.collection('messagelog').insertOne(
                 {
                     id: connection.transaction.uuid,
