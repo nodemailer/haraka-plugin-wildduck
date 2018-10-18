@@ -732,6 +732,7 @@ exports.hook_queue = function(next, connection) {
             sendLogEntry({
                 short_message: 'MX SMTP [Skip forward] ' + connection.transaction.uuid,
                 _mail_action: 'forward',
+                _forward_skipped: 'yes',
                 _spam_score: rspamd.score,
                 _spam_allowed: plugin.cfg.spamScoreForwarding
             });
