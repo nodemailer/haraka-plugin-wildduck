@@ -368,7 +368,7 @@ exports.hook_rcpt = function(next, connection, params) {
                     if (pos >= addressData.targets.length) {
                         resolution = {
                             _forward: 'yes',
-                            _resolved: forwardTargets.join('\n')
+                            _resolved: forwardTargets.join('\n') || 'empty_list'
                         };
                         return hookDone(OK);
                     }
@@ -389,7 +389,7 @@ exports.hook_rcpt = function(next, connection, params) {
                             forwardTargets.push(rcpt.address() + ':' + targetData.value);
                             targetData.recipient = rcpt.address();
                         } else {
-                            forwardTargets.push(rcpt.address());
+                            forwardTargets.push(targetData.value);
                         }
 
                         forwards.set(targetData.value, targetData);
@@ -795,7 +795,7 @@ exports.hook_queue = function(next, connection) {
                 _to: (targets || []).map(target => ((target && target.value) || target).toString().replace(/\?.*$/, '')).join('\n'),
 
                 _queued: 'yes',
-                _forward: 'yes',
+                _forwarded: 'yes',
 
                 _interface: 'mx'
             });
@@ -1048,7 +1048,7 @@ exports.hook_queue = function(next, connection) {
                                             _to: entry.forward,
 
                                             _queued: 'yes',
-                                            _forward: 'yes',
+                                            _forwarded: 'yes',
 
                                             _interface: 'mx'
                                         });
