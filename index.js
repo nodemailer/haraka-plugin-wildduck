@@ -75,10 +75,16 @@ exports.open_database = function(server, next) {
             };
         }
         message = message || {};
-        message.facility = 'mx'; // facility is deprecated but set by the driver if not provided
+
+        const component = plugin.cfg.gelf.component || 'mx';
+        if (!message.short_message || message.short_message.indexOf(component.toUpperCase()) !== 0) {
+            message.short_message = component.toUpperCase() + ' ' + (message.short_message || '');
+        }
+
+        message.facility = component; // facility is deprecated but set by the driver if not provided
         message.host = plugin.hostname;
         message.timestamp = Date.now() / 1000;
-        message._component = 'mx';
+        message._component = component;
 
         Object.keys(message).forEach(key => {
             if (!message[key]) {
@@ -168,7 +174,7 @@ exports.hook_mail = function(next, connection, params) {
         .join('');
 
     plugin.loggelf({
-        short_message: 'MX SMTP [MAIL FROM:' + connection.transaction.notes.sender + '] ' + connection.transaction.uuid,
+        short_message: '[MAIL FROM:' + connection.transaction.notes.sender + '] ' + connection.transaction.uuid,
 
         _mail_action: 'mail_from',
         _from: connection.transaction.notes.sender,
@@ -199,7 +205,7 @@ exports.hook_rcpt = function(next, connection, params) {
     let hookDone = (...args) => {
         if (resolution) {
             let message = {
-                short_message: 'MX SMTP [RCPT TO:' + rcpt.address() + '] ' + connection.transaction.uuid,
+                short_message: '[RCPT TO:' + rcpt.address() + '] ' + connection.transaction.uuid,
                 _mail_action: 'rpt_to',
                 _to: rcpt.address(),
                 _queue_id: connection.transaction.uuid,
@@ -292,7 +298,8 @@ exports.hook_rcpt = function(next, connection, params) {
 
                 resolution = {
                     _srs: 'yes',
-                    _resolved: reversed
+                    _rcpt_accepted: 'yes',
+                    _forward_to: reversed
                 };
                 return hookDone(OK);
             });
@@ -368,7 +375,8 @@ exports.hook_rcpt = function(next, connection, params) {
                     if (pos >= addressData.targets.length) {
                         resolution = {
                             _forward: 'yes',
-                            _resolved: forwardTargets.join('\n') || 'empty_list'
+                            _rcpt_accepted: 'yes',
+                            _forward_to: forwardTargets.join('\n') || 'empty_list'
                         };
                         return hookDone(OK);
                     }
@@ -575,7 +583,8 @@ exports.hook_rcpt = function(next, connection, params) {
                         resolution = {
                             _user: userData._id.toString(),
                             _error: 'user over quota',
-                            _over_quota: 'yes'
+                            _over_quota: 'yes',
+                            _default_address: rcpt.address() !== userData._address ? userData._address : ''
                         };
                         return hookDone(DENY, DSN.mbox_full());
                     }
@@ -593,6 +602,8 @@ exports.hook_rcpt = function(next, connection, params) {
                                     full_message: err.stack,
                                     _rate_limit: 'yes',
                                     _selector: selector,
+                                    _user: userData._id.toString(),
+                                    _default_address: rcpt.address() !== userData._address ? userData._address : '',
 
                                     _error: 'rate limit check failed',
                                     _failure: 'yes',
@@ -605,7 +616,9 @@ exports.hook_rcpt = function(next, connection, params) {
                                 resolution = {
                                     _rate_limit: 'yes',
                                     _selector: selector,
-                                    _error: 'too many attempts'
+                                    _error: 'too many attempts',
+                                    _user: userData._id.toString(),
+                                    _default_address: rcpt.address() !== userData._address ? userData._address : ''
                                 };
                                 return hookDone(DENYSOFT, DSN.rcpt_too_fast());
                             }
@@ -626,6 +639,8 @@ exports.hook_rcpt = function(next, connection, params) {
                                     full_message: err.stack,
                                     _rate_limit: 'yes',
                                     _selector: selector,
+                                    _user: userData._id.toString(),
+                                    _default_address: rcpt.address() !== userData._address ? userData._address : '',
 
                                     _error: 'rate limit check failed',
                                     _failure: 'yes',
@@ -638,7 +653,9 @@ exports.hook_rcpt = function(next, connection, params) {
                                 resolution = {
                                     _rate_limit: 'yes',
                                     _selector: selector,
-                                    _error: 'too many attempts'
+                                    _error: 'too many attempts',
+                                    _user: userData._id.toString(),
+                                    _default_address: rcpt.address() !== userData._address ? userData._address : ''
                                 };
                                 return hookDone(DENYSOFT, DSN.rcpt_too_fast());
                             }
@@ -655,7 +672,8 @@ exports.hook_rcpt = function(next, connection, params) {
 
                             resolution = {
                                 _user: userData._id.toString(),
-                                _resolved: rcpt.address()
+                                _rcpt_accepted: 'yes',
+                                _default_address: rcpt.address() !== userData._address ? userData._address : ''
                             };
                             return hookDone(OK);
                         });
@@ -677,7 +695,7 @@ exports.hook_queue = function(next, connection) {
             let rspamd = connection.transaction.results.get('rspamd');
 
             let message = {
-                short_message: 'MX SMTP [DATA] ' + connection.transaction.uuid,
+                short_message: '[DATA] ' + connection.transaction.uuid,
                 _mail_action: 'data',
                 _queue_id: connection.transaction.uuid,
                 _message_id: (messageId[0] || '').toString().replace(/^[\s<]+|[\s>]+$/g, ''),
@@ -730,7 +748,7 @@ exports.hook_queue = function(next, connection) {
             plugin.loginfo('FORWARDSKIP score=' + JSON.stringify(rspamd.score) + ' required=' + plugin.cfg.spamScoreForwarding, plugin, connection);
 
             sendLogEntry({
-                short_message: 'MX SMTP [Skip forward] ' + connection.transaction.uuid,
+                short_message: '[Skip forward] ' + connection.transaction.uuid,
                 _mail_action: 'forward',
                 _forward_skipped: 'yes',
                 _spam_score: rspamd.score,
@@ -789,7 +807,7 @@ exports.hook_queue = function(next, connection) {
             }
 
             sendLogEntry({
-                short_message: 'MX SMTP [Queued forward] ' + connection.transaction.uuid,
+                short_message: '[Queued forward] ' + connection.transaction.uuid,
                 _mail_action: 'forward',
                 _target_queue_id: args[0].id,
                 _target_address: (targets || []).map(target => ((target && target.value) || target).toString().replace(/\?.*$/, '')).join('\n')
@@ -798,9 +816,9 @@ exports.hook_queue = function(next, connection) {
             plugin.loggelf({
                 _queue_id: args[0].id,
 
-                short_message: 'MX SMTP [QUEUED] ' + args[0].id,
+                short_message: '[QUEUED] ' + args[0].id,
 
-                _parent_id: connection.transaction.uuid,
+                _parent_queue_id: connection.transaction.uuid,
                 _from: connection.transaction.notes.sender,
                 _to: (targets || []).map(target => ((target && target.value) || target).toString().replace(/\?.*$/, '')).join('\n'),
 
@@ -901,7 +919,7 @@ exports.hook_queue = function(next, connection) {
                     }
 
                     sendLogEntry({
-                        short_message: 'MX SMTP [Queued autoreply] ' + connection.transaction.uuid,
+                        short_message: '[Queued autoreply] ' + connection.transaction.uuid,
                         _mail_action: 'autoreply',
                         _target_queue_id: args[0].id,
                         _target_address: addressData.address
@@ -910,9 +928,9 @@ exports.hook_queue = function(next, connection) {
                     plugin.loggelf({
                         _queue_id: args[0].id,
 
-                        short_message: 'MX SMTP [QUEUED] ' + args[0].id,
+                        short_message: '[QUEUED] ' + args[0].id,
 
-                        _parent_id: connection.transaction.uuid,
+                        _parent_queue_id: connection.transaction.uuid,
                         _from: addressData.address,
                         _to: addressData.address,
 
@@ -1040,7 +1058,7 @@ exports.hook_queue = function(next, connection) {
                                 response.filterResults.forEach(entry => {
                                     if (entry.forward) {
                                         sendLogEntry({
-                                            short_message: 'MX SMTP [Queued forward] ' + connection.transaction.uuid,
+                                            short_message: '[Queued forward] ' + connection.transaction.uuid,
                                             _user: userData._id.toString(),
                                             _address: recipient,
                                             _mail_action: 'forward',
@@ -1049,11 +1067,10 @@ exports.hook_queue = function(next, connection) {
                                         });
 
                                         plugin.loggelf({
+                                            short_message: '[QUEUED] ' + entry['forward-queue-id'],
                                             _queue_id: entry['forward-queue-id'],
 
-                                            short_message: 'MX SMTP [QUEUED] ' + entry['forward-queue-id'],
-
-                                            _parent_id: connection.transaction.uuid,
+                                            _parent_queue_id: connection.transaction.uuid,
                                             _from: recipient,
                                             _to: entry.forward,
 
@@ -1067,7 +1084,7 @@ exports.hook_queue = function(next, connection) {
 
                                     if (entry.autoreply) {
                                         sendLogEntry({
-                                            short_message: 'MX SMTP [Queued autoreply] ' + connection.transaction.uuid,
+                                            short_message: '[Queued autoreply] ' + connection.transaction.uuid,
                                             _mail_action: 'autoreply',
                                             _user: userData._id.toString(),
                                             _address: recipient,
@@ -1076,11 +1093,10 @@ exports.hook_queue = function(next, connection) {
                                         });
 
                                         plugin.loggelf({
+                                            short_message: '[QUEUED] ' + entry['autoreply-queue-id'],
                                             _queue_id: entry['autoreply-queue-id'],
 
-                                            short_message: 'MX SMTP [QUEUED] ' + entry['autoreply-queue-id'],
-
-                                            _parent_id: connection.transaction.uuid,
+                                            _parent_queue_id: connection.transaction.uuid,
                                             _from: recipient,
                                             _to: entry.autoreply,
 
@@ -1121,7 +1137,7 @@ exports.hook_queue = function(next, connection) {
                                         _user: userData._id.toString(),
                                         _address: recipient,
                                         _filter: filterMessages.length ? filterMessages.join('\n') : false,
-                                        _is_spam: isSpam ? 'yes' : 'no',
+                                        _filter_is_spam: isSpam ? 'yes' : 'no',
 
                                         _no_store: 'yes',
                                         _error: 'message dropped',
@@ -1140,7 +1156,7 @@ exports.hook_queue = function(next, connection) {
                                         _user: userData._id.toString(),
                                         _address: recipient,
                                         _filter: filterMessages.length ? filterMessages.join('\n') : false,
-                                        _is_spam: isSpam ? 'yes' : 'no',
+                                        _filter_is_spam: isSpam ? 'yes' : 'no',
 
                                         _no_store: 'yes',
                                         _error: 'failed to store message',
@@ -1161,9 +1177,9 @@ exports.hook_queue = function(next, connection) {
                                 _user: userData._id.toString(),
                                 _address: recipient,
                                 _stored: 'yes',
-                                _result: response.response,
+                                _store_result: response.response,
                                 _filter: filterMessages.length ? filterMessages.join('\n') : false,
-                                _is_spam: isSpam ? 'yes' : 'no'
+                                _filter_is_spam: isSpam ? 'yes' : 'no'
                             });
 
                             plugin.loginfo(

@@ -99,6 +99,7 @@ spamHeaders:
 
 gelf:
   enabled: false
+  component: 'mx'
   options:
     graylogPort: 12201
     graylogHostname: '127.0.0.1'
