@@ -1052,8 +1052,11 @@ exports.hook_queue = function(next, connection) {
                                 return next(DENYSOFT, 'Failed to Queue message');
                             }
 
+                            let targetMailbox;
+                            let targetId;
                             let isSpam = false;
                             let filterMessages = [];
+                            let matchingFilters;
                             if (response && response.filterResults && response.filterResults.length) {
                                 response.filterResults.forEach(entry => {
                                     if (entry.forward) {
@@ -1113,6 +1116,17 @@ exports.hook_queue = function(next, connection) {
                                         return;
                                     }
 
+                                    if (entry.mailbox && entry.id) {
+                                        targetMailbox = entry.mailbox;
+                                        targetId = entry.id;
+                                        return;
+                                    }
+
+                                    if (entry.matchingFilters && entry.matchingFilters.length) {
+                                        matchingFilters = entry.matchingFilters;
+                                        return;
+                                    }
+
                                     Object.keys(entry).forEach(key => {
                                         if (!entry[key]) {
                                             return;
@@ -1136,8 +1150,9 @@ exports.hook_queue = function(next, connection) {
 
                                         _user: userData._id.toString(),
                                         _address: recipient,
-                                        _filter: filterMessages.length ? filterMessages.join('\n') : false,
+                                        _filter: filterMessages.length ? filterMessages.join('\n') : '',
                                         _filter_is_spam: isSpam ? 'yes' : 'no',
+                                        _filters_matching: matchingFilters ? matchingFilters.join('\n') : '',
 
                                         _no_store: 'yes',
                                         _error: 'message dropped',
@@ -1155,8 +1170,9 @@ exports.hook_queue = function(next, connection) {
 
                                         _user: userData._id.toString(),
                                         _address: recipient,
-                                        _filter: filterMessages.length ? filterMessages.join('\n') : false,
+                                        _filter: filterMessages.length ? filterMessages.join('\n') : '',
                                         _filter_is_spam: isSpam ? 'yes' : 'no',
+                                        _filters_matching: matchingFilters ? matchingFilters.join('\n') : '',
 
                                         _no_store: 'yes',
                                         _error: 'failed to store message',
@@ -1178,8 +1194,11 @@ exports.hook_queue = function(next, connection) {
                                 _address: recipient,
                                 _stored: 'yes',
                                 _store_result: response.response,
-                                _filter: filterMessages.length ? filterMessages.join('\n') : false,
-                                _filter_is_spam: isSpam ? 'yes' : 'no'
+                                _filter: filterMessages.length ? filterMessages.join('\n') : '',
+                                _filter_is_spam: isSpam ? 'yes' : 'no',
+                                _filters_matching: matchingFilters ? matchingFilters.join('\n') : '',
+                                _stored_mailbox: targetMailbox,
+                                _stored_id: targetId
                             });
 
                             plugin.loginfo(
