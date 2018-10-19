@@ -687,7 +687,7 @@ exports.hook_rcpt = function(next, connection, params) {
 exports.hook_queue = function(next, connection) {
     let plugin = this;
 
-    const { recipients, forwards, autoreplies, users } = connection.transaction.notes.targets;
+    const { forwards, autoreplies, users } = connection.transaction.notes.targets;
 
     let sendLogEntry = resolution => {
         if (resolution) {
@@ -755,18 +755,7 @@ exports.hook_queue = function(next, connection) {
                 _spam_allowed: plugin.cfg.spamScoreForwarding
             });
 
-            return plugin.db.database.collection('messagelog').insertOne(
-                {
-                    id: connection.transaction.uuid,
-                    queueId: connection.transaction.uuid,
-                    action: 'FORWARDSKIP',
-                    from: connection.transaction.notes.sender,
-                    to: Array.from(recipients),
-                    score: rspamd.score,
-                    created: new Date()
-                },
-                () => collectData(done)
-            );
+            return collectData(done);
         }
 
         let targets =
@@ -830,19 +819,7 @@ exports.hook_queue = function(next, connection) {
 
             plugin.loginfo('QUEUED FORWARD queue-id=' + args[0].id, plugin, connection);
 
-            plugin.db.database.collection('messagelog').insertOne(
-                {
-                    id: args[0].id,
-                    messageId: args[0].messageId,
-                    queueId: connection.transaction.uuid,
-                    action: 'FORWARD',
-                    from: connection.transaction.notes.sender,
-                    to: Array.from(recipients),
-                    targets,
-                    created: new Date()
-                },
-                () => done(err, args && args[0] && args[0].id)
-            );
+            done(err, args && args[0] && args[0].id);
         });
 
         if (message) {
@@ -965,259 +942,230 @@ exports.hook_queue = function(next, connection) {
         processKey();
     };
 
-    let logEntry = done => {
-        let rspamd = connection.transaction.results.get('rspamd');
-        return plugin.db.database.collection('messagelog').insertOne(
-            {
-                id: connection.transaction.uuid,
-                queueId: connection.transaction.uuid,
-                action: 'MX',
-                from: connection.transaction.notes.sender,
-                to: Array.from(recipients),
-                score: rspamd && rspamd.score,
-                created: new Date()
-            },
-            done
-        );
-    };
+    // try to forward the message. If forwarding is not needed then continues immediatelly
+    forwardMessage(() => {
+        // send autoreplies to forwarded addresses (if needed)
+        sendAutoreplies(() => {
+            let prepared = false;
 
-    logEntry(() => {
-        // try to forward the message. If forwarding is not needed then continues immediatelly
-        forwardMessage(() => {
-            // send autoreplies to forwarded addresses (if needed)
-            sendAutoreplies(() => {
-                let prepared = false;
+            let userList = Array.from(users).map(e => e[1]);
+            let stored = 0;
 
-                let userList = Array.from(users).map(e => e[1]);
-                let stored = 0;
+            let storeNext = () => {
+                if (stored >= userList.length) {
+                    return updateRateLimits(() => next(OK, 'Message processed'));
+                }
 
-                let storeNext = () => {
-                    if (stored >= userList.length) {
-                        return updateRateLimits(() => next(OK, 'Message processed'));
-                    }
+                let rcptData = userList[stored++];
+                let recipient = rcptData.recipient;
+                let userData = rcptData.userData;
 
-                    let rcptData = userList[stored++];
-                    let recipient = rcptData.recipient;
-                    let userData = rcptData.userData;
+                plugin.logdebug(plugin, 'Filtering message for ' + recipient, plugin, connection);
+                plugin.filterHandler.process(
+                    {
+                        mimeTree: prepared && prepared.mimeTree,
+                        maildata: prepared && prepared.maildata,
+                        user: userData,
+                        sender: connection.transaction.notes.sender,
+                        recipient,
+                        chunks: collector.chunks,
+                        chunklen: collector.chunklen,
+                        meta: {
+                            transactionId: connection.transaction.uuid,
+                            source: 'MX',
+                            from: connection.transaction.notes.sender,
+                            to: [recipient],
+                            origin: connection.remote_ip,
+                            transhost: connection.hello.host,
+                            transtype: connection.transaction.notes.transmissionType,
+                            time: new Date()
+                        }
+                    },
+                    (err, response, preparedResponse) => {
+                        if (err) {
+                            sendLogEntry({
+                                full_message: err.stack,
 
-                    plugin.logdebug(plugin, 'Filtering message for ' + recipient, plugin, connection);
-                    plugin.filterHandler.process(
-                        {
-                            mimeTree: prepared && prepared.mimeTree,
-                            maildata: prepared && prepared.maildata,
-                            user: userData,
-                            sender: connection.transaction.notes.sender,
-                            recipient,
-                            chunks: collector.chunks,
-                            chunklen: collector.chunklen,
-                            meta: {
-                                transactionId: connection.transaction.uuid,
-                                source: 'MX',
-                                from: connection.transaction.notes.sender,
-                                to: [recipient],
-                                origin: connection.remote_ip,
-                                transhost: connection.hello.host,
-                                transtype: connection.transaction.notes.transmissionType,
-                                time: new Date()
+                                _user: userData._id.toString(),
+                                _address: recipient,
+
+                                _no_store: 'yes',
+                                _error: 'failed to store message',
+                                _failure: 'yes',
+                                _err_code: err.code
+                            });
+
+                            // we can fail the message even if some recipients were already processed
+                            // as redelivery would not be a problem - duplicate deliveries are ignored (filters are rerun though).
+                            plugin.loginfo('DEFERRED rcpt=' + recipient + ' error=' + err.message, plugin, connection);
+                            return next(DENYSOFT, 'Failed to Queue message');
+                        }
+
+                        let targetMailbox;
+                        let targetId;
+                        let isSpam = false;
+                        let filterMessages = [];
+                        let matchingFilters;
+                        if (response && response.filterResults && response.filterResults.length) {
+                            response.filterResults.forEach(entry => {
+                                if (entry.forward) {
+                                    sendLogEntry({
+                                        short_message: '[Queued forward] ' + connection.transaction.uuid,
+                                        _user: userData._id.toString(),
+                                        _address: recipient,
+                                        _mail_action: 'forward',
+                                        _target_queue_id: entry['forward-queue-id'],
+                                        _target_address: entry.forward
+                                    });
+
+                                    plugin.loggelf({
+                                        short_message: '[QUEUED] ' + entry['forward-queue-id'],
+                                        _queue_id: entry['forward-queue-id'],
+
+                                        _parent_queue_id: connection.transaction.uuid,
+                                        _from: recipient,
+                                        _to: entry.forward,
+
+                                        _queued: 'yes',
+                                        _forwarded: 'yes',
+
+                                        _interface: 'mx'
+                                    });
+                                    return;
+                                }
+
+                                if (entry.autoreply) {
+                                    sendLogEntry({
+                                        short_message: '[Queued autoreply] ' + connection.transaction.uuid,
+                                        _mail_action: 'autoreply',
+                                        _user: userData._id.toString(),
+                                        _address: recipient,
+                                        _target_queue_id: entry['autoreply-queue-id'],
+                                        _target_address: entry.autoreply
+                                    });
+
+                                    plugin.loggelf({
+                                        short_message: '[QUEUED] ' + entry['autoreply-queue-id'],
+                                        _queue_id: entry['autoreply-queue-id'],
+
+                                        _parent_queue_id: connection.transaction.uuid,
+                                        _from: recipient,
+                                        _to: entry.autoreply,
+
+                                        _queued: 'yes',
+                                        _autoreply: 'yes',
+
+                                        _interface: 'mx'
+                                    });
+                                    return;
+                                }
+
+                                if (entry.spam) {
+                                    isSpam = true;
+                                    return;
+                                }
+
+                                if (entry.mailbox && entry.id) {
+                                    targetMailbox = entry.mailbox;
+                                    targetId = entry.id;
+                                    return;
+                                }
+
+                                if (entry.matchingFilters && entry.matchingFilters.length) {
+                                    matchingFilters = entry.matchingFilters;
+                                    return;
+                                }
+
+                                Object.keys(entry).forEach(key => {
+                                    if (!entry[key]) {
+                                        return;
+                                    }
+                                    if (typeof entry[key] === 'boolean') {
+                                        filterMessages.push(key);
+                                    } else {
+                                        filterMessages.push(key + '=' + (entry[key] || '').toString());
+                                    }
+                                });
+                            });
+                            if (filterMessages.length) {
+                                plugin.loginfo('FILTER ACTIONS ' + filterMessages.join(','), plugin, connection);
                             }
-                        },
-                        (err, response, preparedResponse) => {
-                            if (err) {
-                                plugin.db.database.collection('messagelog').insertOne(
-                                    {
-                                        id: connection.transaction.uuid,
-                                        queueId: connection.transaction.uuid,
-                                        action: 'ERROR',
-                                        error: err.message,
-                                        created: new Date()
-                                    },
-                                    () => false
-                                );
+                        }
 
+                        if (response && response.error) {
+                            if (response.error.code === 'DroppedByPolicy') {
                                 sendLogEntry({
-                                    full_message: err.stack,
+                                    full_message: response.error.message,
 
                                     _user: userData._id.toString(),
                                     _address: recipient,
+                                    _filter: filterMessages.length ? filterMessages.join('\n') : '',
+                                    _filter_is_spam: isSpam ? 'yes' : 'no',
+                                    _filters_matching: matchingFilters ? matchingFilters.join('\n') : '',
+
+                                    _no_store: 'yes',
+                                    _error: 'message dropped',
+                                    _dropped: 'yes',
+                                    _err_code: response.error.code
+                                });
+                                plugin.loginfo(
+                                    'DROPPED rcpt=' + recipient + ' user=' + userData.address + '[' + userData._id + '] error=' + response.error.message,
+                                    plugin,
+                                    connection
+                                );
+                            } else {
+                                sendLogEntry({
+                                    full_message: response.error.stack,
+
+                                    _user: userData._id.toString(),
+                                    _address: recipient,
+                                    _filter: filterMessages.length ? filterMessages.join('\n') : '',
+                                    _filter_is_spam: isSpam ? 'yes' : 'no',
+                                    _filters_matching: matchingFilters ? matchingFilters.join('\n') : '',
 
                                     _no_store: 'yes',
                                     _error: 'failed to store message',
                                     _failure: 'yes',
-                                    _err_code: err.code
+                                    _err_code: response.error.code
                                 });
-
-                                // we can fail the message even if some recipients were already processed
-                                // as redelivery would not be a problem - duplicate deliveries are ignored (filters are rerun though).
-                                plugin.loginfo('DEFERRED rcpt=' + recipient + ' error=' + err.message, plugin, connection);
-                                return next(DENYSOFT, 'Failed to Queue message');
+                                plugin.loginfo(
+                                    'DEFERRED rcpt=' + recipient + ' user=' + userData.address + '[' + userData._id + '] error=' + response.error.message,
+                                    plugin,
+                                    connection
+                                );
                             }
 
-                            let targetMailbox;
-                            let targetId;
-                            let isSpam = false;
-                            let filterMessages = [];
-                            let matchingFilters;
-                            if (response && response.filterResults && response.filterResults.length) {
-                                response.filterResults.forEach(entry => {
-                                    if (entry.forward) {
-                                        sendLogEntry({
-                                            short_message: '[Queued forward] ' + connection.transaction.uuid,
-                                            _user: userData._id.toString(),
-                                            _address: recipient,
-                                            _mail_action: 'forward',
-                                            _target_queue_id: entry['forward-queue-id'],
-                                            _target_address: entry.forward
-                                        });
-
-                                        plugin.loggelf({
-                                            short_message: '[QUEUED] ' + entry['forward-queue-id'],
-                                            _queue_id: entry['forward-queue-id'],
-
-                                            _parent_queue_id: connection.transaction.uuid,
-                                            _from: recipient,
-                                            _to: entry.forward,
-
-                                            _queued: 'yes',
-                                            _forwarded: 'yes',
-
-                                            _interface: 'mx'
-                                        });
-                                        return;
-                                    }
-
-                                    if (entry.autoreply) {
-                                        sendLogEntry({
-                                            short_message: '[Queued autoreply] ' + connection.transaction.uuid,
-                                            _mail_action: 'autoreply',
-                                            _user: userData._id.toString(),
-                                            _address: recipient,
-                                            _target_queue_id: entry['autoreply-queue-id'],
-                                            _target_address: entry.autoreply
-                                        });
-
-                                        plugin.loggelf({
-                                            short_message: '[QUEUED] ' + entry['autoreply-queue-id'],
-                                            _queue_id: entry['autoreply-queue-id'],
-
-                                            _parent_queue_id: connection.transaction.uuid,
-                                            _from: recipient,
-                                            _to: entry.autoreply,
-
-                                            _queued: 'yes',
-                                            _autoreply: 'yes',
-
-                                            _interface: 'mx'
-                                        });
-                                        return;
-                                    }
-
-                                    if (entry.spam) {
-                                        isSpam = true;
-                                        return;
-                                    }
-
-                                    if (entry.mailbox && entry.id) {
-                                        targetMailbox = entry.mailbox;
-                                        targetId = entry.id;
-                                        return;
-                                    }
-
-                                    if (entry.matchingFilters && entry.matchingFilters.length) {
-                                        matchingFilters = entry.matchingFilters;
-                                        return;
-                                    }
-
-                                    Object.keys(entry).forEach(key => {
-                                        if (!entry[key]) {
-                                            return;
-                                        }
-                                        if (typeof entry[key] === 'boolean') {
-                                            filterMessages.push(key);
-                                        } else {
-                                            filterMessages.push(key + '=' + (entry[key] || '').toString());
-                                        }
-                                    });
-                                });
-                                if (filterMessages.length) {
-                                    plugin.loginfo('FILTER ACTIONS ' + filterMessages.join(','), plugin, connection);
-                                }
-                            }
-
-                            if (response && response.error) {
-                                if (response.error.code === 'DroppedByPolicy') {
-                                    sendLogEntry({
-                                        full_message: response.error.message,
-
-                                        _user: userData._id.toString(),
-                                        _address: recipient,
-                                        _filter: filterMessages.length ? filterMessages.join('\n') : '',
-                                        _filter_is_spam: isSpam ? 'yes' : 'no',
-                                        _filters_matching: matchingFilters ? matchingFilters.join('\n') : '',
-
-                                        _no_store: 'yes',
-                                        _error: 'message dropped',
-                                        _dropped: 'yes',
-                                        _err_code: response.error.code
-                                    });
-                                    plugin.loginfo(
-                                        'DROPPED rcpt=' + recipient + ' user=' + userData.address + '[' + userData._id + '] error=' + response.error.message,
-                                        plugin,
-                                        connection
-                                    );
-                                } else {
-                                    sendLogEntry({
-                                        full_message: response.error.stack,
-
-                                        _user: userData._id.toString(),
-                                        _address: recipient,
-                                        _filter: filterMessages.length ? filterMessages.join('\n') : '',
-                                        _filter_is_spam: isSpam ? 'yes' : 'no',
-                                        _filters_matching: matchingFilters ? matchingFilters.join('\n') : '',
-
-                                        _no_store: 'yes',
-                                        _error: 'failed to store message',
-                                        _failure: 'yes',
-                                        _err_code: response.error.code
-                                    });
-                                    plugin.loginfo(
-                                        'DEFERRED rcpt=' + recipient + ' user=' + userData.address + '[' + userData._id + '] error=' + response.error.message,
-                                        plugin,
-                                        connection
-                                    );
-                                }
-
-                                return next(response.error.code === 'DroppedByPolicy' ? DENY : DENYSOFT, response.error.message);
-                            }
-
-                            sendLogEntry({
-                                _user: userData._id.toString(),
-                                _address: recipient,
-                                _stored: 'yes',
-                                _store_result: response.response,
-                                _filter: filterMessages.length ? filterMessages.join('\n') : '',
-                                _filter_is_spam: isSpam ? 'yes' : 'no',
-                                _filters_matching: matchingFilters ? matchingFilters.join('\n') : '',
-                                _stored_mailbox: targetMailbox,
-                                _stored_id: targetId
-                            });
-
-                            plugin.loginfo(
-                                'STORED rcpt=' + recipient + ' user=' + userData.address + '[' + userData._id + '] result=' + response.response,
-                                plugin,
-                                connection
-                            );
-
-                            if (!prepared && preparedResponse) {
-                                // reuse parsed message structure
-                                prepared = preparedResponse;
-                            }
-
-                            setImmediate(storeNext);
+                            return next(response.error.code === 'DroppedByPolicy' ? DENY : DENYSOFT, response.error.message);
                         }
-                    );
-                };
-                storeNext();
-            });
+
+                        sendLogEntry({
+                            _user: userData._id.toString(),
+                            _address: recipient,
+                            _stored: 'yes',
+                            _store_result: response.response,
+                            _filter: filterMessages.length ? filterMessages.join('\n') : '',
+                            _filter_is_spam: isSpam ? 'yes' : 'no',
+                            _filters_matching: matchingFilters ? matchingFilters.join('\n') : '',
+                            _stored_mailbox: targetMailbox,
+                            _stored_id: targetId
+                        });
+
+                        plugin.loginfo(
+                            'STORED rcpt=' + recipient + ' user=' + userData.address + '[' + userData._id + '] result=' + response.response,
+                            plugin,
+                            connection
+                        );
+
+                        if (!prepared && preparedResponse) {
+                            // reuse parsed message structure
+                            prepared = preparedResponse;
+                        }
+
+                        setImmediate(storeNext);
+                    }
+                );
+            };
+            storeNext();
         });
     });
 };
