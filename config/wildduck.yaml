@@ -68,8 +68,6 @@ limits:
   rcpt: 300 # allowed messages for the same recipient during window size
   rcptIp: 100 # allowed messages for the same recipient from same IP during window size
 
-spamScore: 6
-
 # do not process forwarding addresses for messages with the following spam score
 spamScoreForwarding: 10
 
