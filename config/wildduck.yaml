@@ -73,30 +73,6 @@ spamScore: 6
 # do not process forwarding addresses for messages with the following spam score
 spamScoreForwarding: 10
 
-spamHeaders:
-  # If this header exists and starts with "yes" then the message is treated as spam
-  # This is SpamAssassin header.
-  - key: "X-Spam-Status"
-    value: "^yes"
-    target: "\\Junk"
-
-  # If this header exists and starts with "yes" then the message is treated as spam
-  # This is Rspamd header. For the same with SpamAssassin use "X-Spam-Status"
-  - key: "X-Rspamd-Spam"
-    value: "^yes"
-    target: "\\Junk"
-
-  # Treat as spam if message has header with 6 or more plus signs:
-  #   X-Rspamd-Bar: ++++++
-  - key: "X-Rspamd-Bar"
-    value: "^\\+{6}"
-    target: "\\Junk"
-
-  # If this header has a value, then it contains a virus, treat as spam
-  - key: "X-Haraka-Virus"
-    value: "."
-    target: "\\Junk"
-
 gelf:
   enabled: false
   component: 'mx'

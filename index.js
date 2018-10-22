@@ -112,15 +112,10 @@ exports.open_database = function(server, next) {
                 gfs: plugin.cfg.sender.gfs
             });
 
-            let spamChecks = plugin.cfg.spamHeaders && tools.prepareSpamChecks(plugin.cfg.spamHeaders);
-
             plugin.filterHandler = new FilterHandler({
                 db,
                 sender: plugin.cfg.sender,
                 messageHandler: plugin.db.messageHandler,
-                spamChecks,
-                spamHeaderKeys: spamChecks && spamChecks.map(check => check.key),
-                spamScoreValue: plugin.cfg.spamScore,
                 loggelf: message => plugin.loggelf(message)
             });
 
@@ -847,7 +842,6 @@ exports.hook_queue = function(next, connection) {
         if (!autoreplies.size) {
             return done();
         }
-        // TODO: send autoreply messages
 
         let curtime = new Date();
         let pos = 0;
