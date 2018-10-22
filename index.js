@@ -700,6 +700,7 @@ exports.hook_queue = function(next, connection) {
                 _queue_id: connection.transaction.uuid,
                 _message_id: (messageId[0] || '').toString().replace(/^[\s<]+|[\s>]+$/g, ''),
                 _spam_score: rspamd ? rspamd.score : '',
+                _spam_action: rspamd ? rspamd.action : '',
                 _mail_from: connection.transaction.notes.sender
             };
 
@@ -752,6 +753,7 @@ exports.hook_queue = function(next, connection) {
                 _mail_action: 'forward',
                 _forward_skipped: 'yes',
                 _spam_score: rspamd.score,
+                _spam_action: rspamd ? rspamd.action : '',
                 _spam_allowed: plugin.cfg.spamScoreForwarding
             });
 
@@ -956,6 +958,7 @@ exports.hook_queue = function(next, connection) {
                     return updateRateLimits(() => next(OK, 'Message processed'));
                 }
 
+                let rspamd = connection.transaction.results.get('rspamd');
                 let rcptData = userList[stored++];
                 let recipient = rcptData.recipient;
                 let userData = rcptData.userData;
@@ -978,6 +981,8 @@ exports.hook_queue = function(next, connection) {
                             origin: connection.remote_ip,
                             transhost: connection.hello.host,
                             transtype: connection.transaction.notes.transmissionType,
+                            spamScore: rspamd ? rspamd.score : false,
+                            spamAction: rspamd ? rspamd.action : false,
                             time: new Date()
                         }
                     },
