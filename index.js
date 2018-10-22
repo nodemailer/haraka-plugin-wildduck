@@ -453,13 +453,13 @@ exports.hook_rcpt = function(next, connection, params) {
                                 // unknown user, treat as normal forward
                                 targetData.recipient = rcpt.address();
                                 forwards.set(targetData.value, targetData);
-                                forwardTargets.push(rcpt.address());
+                                forwardTargets.push(targetData.value);
                                 return setImmediate(processTarget);
                             }
 
                             if (userData.disabled) {
                                 // disabled user, skip
-                                forwardTargets.push(rcpt.address() + ':disabled');
+                                forwardTargets.push(targetData.value + ':' + userData._id + '[disabled]');
                                 return setImmediate(processTarget);
                             }
 
@@ -467,7 +467,7 @@ exports.hook_rcpt = function(next, connection, params) {
                             let quota = userData.quota || consts.MAX_STORAGE;
                             if (userData.storageUsed && quota <= userData.storageUsed) {
                                 // can not deliver mail to this user, over quota, skip
-                                forwardTargets.push(rcpt.address() + ':over_quota');
+                                forwardTargets.push(targetData.value + ':' + userData._id + '[over_quota]');
                                 return setImmediate(processTarget);
                             }
 
@@ -476,7 +476,7 @@ exports.hook_rcpt = function(next, connection, params) {
                                 recipient: rcpt.address()
                             });
 
-                            forwardTargets.push(rcpt.address() + ':' + userData._id);
+                            forwardTargets.push(targetData.value + ':' + userData._id);
 
                             setImmediate(processTarget);
                         }
