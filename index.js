@@ -697,7 +697,7 @@ exports.hook_queue = function(next, connection) {
                 _message_id: (messageId[0] || '').toString().replace(/^[\s<]+|[\s>]+$/g, ''),
                 _spam_score: rspamd ? rspamd.score : '',
                 _spam_action: rspamd ? rspamd.action : '',
-                _mail_from: connection.transaction.notes.sender
+                _from: connection.transaction.notes.sender
             };
 
             Object.keys(resolution).forEach(key => {
@@ -1039,7 +1039,7 @@ exports.hook_queue = function(next, connection) {
                                         sendLogEntry({
                                             short_message: '[Queued forward] ' + connection.transaction.uuid,
                                             _user: userData._id.toString(),
-                                            _address: recipient,
+                                            _to: recipient,
                                             _mail_action: 'forward',
                                             _target_queue_id: entry['forward-queue-id'],
                                             _target_address: entry.forward
@@ -1066,7 +1066,7 @@ exports.hook_queue = function(next, connection) {
                                             short_message: '[Queued autoreply] ' + connection.transaction.uuid,
                                             _mail_action: 'autoreply',
                                             _user: userData._id.toString(),
-                                            _address: recipient,
+                                            _to: recipient,
                                             _target_queue_id: entry['autoreply-queue-id'],
                                             _target_address: entry.autoreply
                                         });
@@ -1126,7 +1126,7 @@ exports.hook_queue = function(next, connection) {
                                         full_message: response.error.message,
 
                                         _user: userData._id.toString(),
-                                        _address: recipient,
+                                        _to: recipient,
                                         _filter: filterMessages.length ? filterMessages.join('\n') : '',
                                         _filter_is_spam: isSpam ? 'yes' : 'no',
                                         _filters_matching: matchingFilters ? matchingFilters.join('\n') : '',
@@ -1146,7 +1146,7 @@ exports.hook_queue = function(next, connection) {
                                         full_message: response.error.stack,
 
                                         _user: userData._id.toString(),
-                                        _address: recipient,
+                                        _to: recipient,
                                         _filter: filterMessages.length ? filterMessages.join('\n') : '',
                                         _filter_is_spam: isSpam ? 'yes' : 'no',
                                         _filters_matching: matchingFilters ? matchingFilters.join('\n') : '',
@@ -1168,7 +1168,7 @@ exports.hook_queue = function(next, connection) {
 
                             sendLogEntry({
                                 _user: userData._id.toString(),
-                                _address: recipient,
+                                _to: recipient,
                                 _stored: 'yes',
                                 _store_result: response.response,
                                 _filter: filterMessages.length ? filterMessages.join('\n') : '',
