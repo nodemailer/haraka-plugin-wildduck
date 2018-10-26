@@ -21,6 +21,7 @@ const autoreply = require('wildduck/lib/autoreply');
 const consts = require('wildduck/lib/consts');
 const Gelf = require('gelf');
 const addressparser = require('nodemailer/lib/addressparser');
+const libmime = require('libmime');
 
 DSN.rcpt_too_fast = () =>
     DSN.create(
@@ -202,7 +203,7 @@ exports.hook_rcpt = function(next, connection, params) {
         if (resolution) {
             let message = {
                 short_message: '[RCPT TO:' + rcpt.address() + '] ' + connection.transaction.uuid,
-                _mail_action: 'rpt_to',
+                _mail_action: 'rcpt_to',
                 _to: rcpt.address(),
                 _queue_id: connection.transaction.uuid,
                 _ip: connection.remote_ip,
@@ -684,20 +685,28 @@ exports.hook_queue = function(next, connection) {
     let plugin = this;
 
     const { forwards, autoreplies, users } = connection.transaction.notes.targets;
+    let messageId = (connection.transaction.header.get('Message-Id') || '').toString();
+    let subject = (connection.transaction.header.get('Subject') || '').toString();
 
     let sendLogEntry = resolution => {
         if (resolution) {
-            let messageId = connection.transaction.header.get_all('Message-Id');
             let rspamd = connection.transaction.results.get('rspamd');
 
+            try {
+                subject = libmime.decodeWords(subject).trim();
+            } catch (E) {
+                // failed to parse value
+            }
+
             let message = {
-                short_message: '[DATA] ' + connection.transaction.uuid,
-                _mail_action: 'data',
+                short_message: '[PROCESS] ' + connection.transaction.uuid,
+                _mail_action: 'process',
                 _queue_id: connection.transaction.uuid,
-                _message_id: (messageId[0] || '').toString().replace(/^[\s<]+|[\s>]+$/g, ''),
+                _message_id: messageId.replace(/^[\s<]+|[\s>]+$/g, ''),
                 _spam_score: rspamd ? rspamd.score : '',
                 _spam_action: rspamd ? rspamd.action : '',
-                _from: connection.transaction.notes.sender
+                _from: connection.transaction.notes.sender,
+                _subject: subject
             };
 
             Object.keys(resolution).forEach(key => {
