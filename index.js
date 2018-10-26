@@ -186,6 +186,33 @@ exports.hook_mail = function(next, connection, params) {
 exports.hook_rcpt = function(next, connection, params) {
     let plugin = this;
 
+    let tryCount = 0;
+    let tryTimer = false;
+
+    let runHandler = () => {
+        clearTimeout(tryTimer);
+        plugin.real_rcpt_handler(next, connection, params);
+    };
+
+    // rcpt check requires access to the db which might not be available yet
+    let runCheck = () => {
+        if (!plugin.db) {
+            // database not opened yet
+            if (tryCount++ < 10) {
+                tryTimer = setTimeout(runCheck, tryCount * 100);
+                return;
+            }
+            return next(DENYSOFT, 'Failed to Queue message, try again');
+        }
+        runHandler();
+    };
+
+    runCheck();
+};
+
+exports.real_rcpt_handler = function(next, connection, params) {
+    let plugin = this;
+
     const { recipients, forwards, autoreplies, users } = connection.transaction.notes.targets;
 
     let rcpt = params[0];
