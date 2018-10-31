@@ -19,6 +19,7 @@ const Maildropper = require('wildduck/lib/maildropper');
 const FilterHandler = require('wildduck/lib/filter-handler');
 const autoreply = require('wildduck/lib/autoreply');
 const consts = require('wildduck/lib/consts');
+const wdErrors = require('wildduck/lib/errors');
 const Gelf = require('gelf');
 const addressparser = require('nodemailer/lib/addressparser');
 const libmime = require('libmime');
@@ -69,6 +70,7 @@ exports.open_database = function(server, next) {
                   // placeholder
                   emit: () => false
               };
+    wdErrors.setGelf(plugin.gelf);
 
     plugin.loggelf = message => {
         if (typeof message === 'string') {
