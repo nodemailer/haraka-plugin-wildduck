@@ -108,6 +108,9 @@ exports.open_database = function(server, next) {
             plugin.db = db;
             plugin.ttlcounter = counters(db.redis).ttlcounter;
 
+            plugin.db.messageHandler.loggelf = message => plugin.loggelf(message);
+            plugin.db.userHandler.loggelf = message => plugin.loggelf(message);
+
             plugin.maildrop = new Maildropper({
                 db,
                 enabled: plugin.cfg.sender.enabled,
