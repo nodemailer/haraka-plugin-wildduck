@@ -98,38 +98,63 @@ exports.open_database = function(server, next) {
         plugin.gelf.emit('gelf.log', message);
     };
 
-    db.connect(
-        server.notes.redis,
-        plugin.cfg,
-        (err, db) => {
-            if (err) {
-                return next(err);
+    let createConnection = done => {
+        db.connect(
+            server.notes.redis,
+            plugin.cfg,
+            (err, db) => {
+                if (err) {
+                    return done(err);
+                }
+                plugin.db = db;
+                plugin.ttlcounter = counters(db.redis).ttlcounter;
+
+                plugin.db.messageHandler.loggelf = message => plugin.loggelf(message);
+                plugin.db.userHandler.loggelf = message => plugin.loggelf(message);
+
+                plugin.maildrop = new Maildropper({
+                    db,
+                    enabled: plugin.cfg.sender.enabled,
+                    zone: plugin.cfg.sender.zone,
+                    collection: plugin.cfg.sender.collection,
+                    gfs: plugin.cfg.sender.gfs
+                });
+
+                plugin.filterHandler = new FilterHandler({
+                    db,
+                    sender: plugin.cfg.sender,
+                    messageHandler: plugin.db.messageHandler,
+                    loggelf: message => plugin.loggelf(message)
+                });
+
+                done();
             }
-            plugin.db = db;
-            plugin.ttlcounter = counters(db.redis).ttlcounter;
+        );
+    };
 
-            plugin.db.messageHandler.loggelf = message => plugin.loggelf(message);
-            plugin.db.userHandler.loggelf = message => plugin.loggelf(message);
-
-            plugin.maildrop = new Maildropper({
-                db,
-                enabled: plugin.cfg.sender.enabled,
-                zone: plugin.cfg.sender.zone,
-                collection: plugin.cfg.sender.collection,
-                gfs: plugin.cfg.sender.gfs
-            });
-
-            plugin.filterHandler = new FilterHandler({
-                db,
-                sender: plugin.cfg.sender,
-                messageHandler: plugin.db.messageHandler,
-                loggelf: message => plugin.loggelf(message)
-            });
+    let returned = false;
+    let tryCreateConnection = () => {
+        createConnection(err => {
+            if (err) {
+                if (!returned) {
+                    plugin.logcrit('Database connection failed. ' + err.message, plugin);
+                    returned = true;
+                    next();
+                }
+                // keep trying to open up the DB connection
+                setTimeout(tryCreateConnection, 2 * 1000);
+                return;
+            }
 
             plugin.loginfo('Database connection opened', plugin);
-            next();
-        }
-    );
+            if (!returned) {
+                returned = true;
+                next();
+            }
+        });
+    };
+
+    tryCreateConnection();
 };
 
 exports.normalize_address = function(address) {
@@ -193,24 +218,56 @@ exports.hook_rcpt = function(next, connection, params) {
 
     let tryCount = 0;
     let tryTimer = false;
+    let returned = false;
+    let waitTimeout = false;
 
     let runHandler = () => {
         clearTimeout(tryTimer);
-        plugin.real_rcpt_handler(next, connection, params);
+        plugin.real_rcpt_handler(
+            (...args) => {
+                clearTimeout(waitTimeout);
+                if (returned) {
+                    return;
+                }
+                returned = true;
+                let err = args && args[0];
+                if (err && /Error$/.test(err.name)) {
+                    plugin.logerror(err, plugin, connection);
+                    return next(DENYSOFT, 'Failed to process recipient, try again [ERRC01]');
+                }
+                next(...args);
+            },
+            connection,
+            params
+        );
     };
 
     // rcpt check requires access to the db which might not be available yet
     let runCheck = () => {
+        if (returned) {
+            return;
+        }
         if (!plugin.db) {
             // database not opened yet
-            if (tryCount++ < 10) {
-                tryTimer = setTimeout(runCheck, tryCount * 100);
+            if (tryCount++ < 5) {
+                tryTimer = setTimeout(runCheck, tryCount * 150);
                 return;
             }
-            return next(DENYSOFT, 'Failed to Queue message, try again');
+            clearTimeout(waitTimeout);
+            returned = true;
+            return next(DENYSOFT, 'Failed to process recipient, try again [ERRC02]');
         }
         runHandler();
     };
+
+    waitTimeout = setTimeout(() => {
+        clearTimeout(waitTimeout);
+        if (returned) {
+            return;
+        }
+        returned = true;
+        return next(DENYSOFT, 'Failed to process recipient, try again [ERRC03]');
+    }, 8 * 1000);
 
     runCheck();
 };
@@ -305,6 +362,7 @@ exports.real_rcpt_handler = function(next, connection, params) {
                         _error: 'rate limit check failed',
                         _err_code: err.code
                     };
+                    err.code = err.code || 'RateLimit';
                     return hookDone(err);
                 }
 
@@ -354,6 +412,7 @@ exports.real_rcpt_handler = function(next, connection, params) {
                         _error: 'rate limit check failed',
                         _err_code: err.code
                     };
+                    err.code = err.code || 'RateLimit';
                     return hookDone(err);
                 } else if (!result.success) {
                     connection.lognotice(
@@ -540,6 +599,7 @@ exports.real_rcpt_handler = function(next, connection, params) {
                     _failure: 'yes',
                     _err_code: err.code
                 };
+                err.code = err.code || 'ResolveAddress';
                 return hookDone(err);
             }
 
@@ -583,6 +643,7 @@ exports.real_rcpt_handler = function(next, connection, params) {
                             _failure: 'yes',
                             _err_code: err.code
                         };
+                        err.code = err.code || 'GetUserData';
                         return hookDone(err);
                     }
 
@@ -638,6 +699,7 @@ exports.real_rcpt_handler = function(next, connection, params) {
                                     _failure: 'yes',
                                     _err_code: err.code
                                 };
+                                err.code = err.code || 'RateLimit';
                                 return hookDone(err);
                             }
 
@@ -675,6 +737,7 @@ exports.real_rcpt_handler = function(next, connection, params) {
                                     _failure: 'yes',
                                     _err_code: err.code
                                 };
+                                err.code = err.code || 'RateLimit';
                                 return hookDone(err);
                             }
 
@@ -763,12 +826,11 @@ exports.hook_queue = function(next, connection) {
             plugin.logerror('PIPEFAIL error=' + err.message, plugin, connection);
             sendLogEntry({
                 full_message: err.stack,
-
                 _error: 'pipefail processing input',
                 _failure: 'yes',
                 _err_code: err.code
             });
-            return next(DENYSOFT, 'Failed to Queue message');
+            return next(DENYSOFT, 'Failed to queue message [ERRQ01]');
         });
 
         connection.transaction.message_stream.pipe(collector);
@@ -783,7 +845,7 @@ exports.hook_queue = function(next, connection) {
                 _failure: 'yes',
                 _err_code: err.code
             });
-            return next(DENYSOFT, 'Failed to Queue message');
+            return next(DENYSOFT, 'Failed to queue message [ERRQ02]');
         }
 
         // filter user ids that are allowed to send autoreplies
@@ -855,7 +917,7 @@ exports.hook_queue = function(next, connection) {
                             _failure: 'yes',
                             _err_code: err.code
                         });
-                        return next(DENYSOFT, 'Failed to Queue message');
+                        return next(DENYSOFT, 'Failed to queue message [ERRQ03]');
                     }
                     return done(err, ...args);
                 }
@@ -898,7 +960,7 @@ exports.hook_queue = function(next, connection) {
                         _failure: 'yes',
                         _err_code: err.code
                     });
-                    return next(DENYSOFT, 'Failed to Queue message');
+                    return next(DENYSOFT, 'Failed to queue message [ERRQ04]');
                 });
 
                 // pipe the message to the collector object to gather message chunks for further processing
@@ -1066,7 +1128,7 @@ exports.hook_queue = function(next, connection) {
                                 // we can fail the message even if some recipients were already processed
                                 // as redelivery would not be a problem - duplicate deliveries are ignored (filters are rerun though).
                                 plugin.loginfo('DEFERRED rcpt=' + recipient + ' error=' + err.message, plugin, connection);
-                                return next(DENYSOFT, 'Failed to Queue message');
+                                return next(DENYSOFT, 'Failed to queue message [ERRQ05]');
                             }
 
                             let targetMailbox;
