@@ -293,6 +293,7 @@ exports.real_rcpt_handler = function(next, connection, params) {
             let message = {
                 short_message: '[RCPT TO:' + rcpt.address() + '] ' + connection.transaction.uuid,
                 _mail_action: 'rcpt_to',
+                _from: connection.transaction.notes.sender,
                 _to: rcpt.address(),
                 _queue_id: connection.transaction.uuid,
                 _ip: connection.remote_ip,
