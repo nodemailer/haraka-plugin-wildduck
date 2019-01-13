@@ -585,6 +585,7 @@ exports.real_rcpt_handler = function(next, connection, params) {
                 name: true,
                 address: true,
                 addrview: true,
+                forwards: true,
                 autoreply: true,
                 targets: true // only forwarded address has `targets` set
             }
@@ -624,6 +625,7 @@ exports.real_rcpt_handler = function(next, connection, params) {
                     name: true,
                     address: true,
                     forwards: true,
+                    receivedMax: true,
                     targets: true,
                     autoreply: true,
                     encryptMessages: true,
