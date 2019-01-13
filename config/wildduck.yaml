@@ -1,11 +1,8 @@
----
-
 ## Connect to a master instance or Redis
 redis:
-
-  port: 6379
-  host: "127.0.0.1"
-  db: 3
+    port: 6379
+    host: '127.0.0.1'
+    db: 3
 #  password: ""
 
 ## Or alternatively, connect to Redis Sentinel
@@ -22,59 +19,59 @@ redis:
 #       port: 26379
 
 mongo:
+    # connection string for main messages database
+    url: 'mongodb://127.0.0.1:27017/wildduck'
 
-  # connection string for main messages database
-  url: "mongodb://127.0.0.1:27017/wildduck"
+    ## database name or connection string for the users db
+    #users: "users"
 
-  ## database name or connection string for the users db
-  #users: "users"
+    ## database name or connection string for the attachments db
+    #gridfs: "attachments"
 
-  ## database name or connection string for the attachments db
-  #gridfs: "attachments"
-
-  ## database name or connection string for the outbound queue
-  sender: "zone-mta"
+    ## database name or connection string for the outbound queue
+    sender: 'zone-mta'
 
 sender:
-  # Push messages to ZoneMTA queue for delivery
-  # if `false` then no messages are sent
-  enabled: true
+    # Push messages to ZoneMTA queue for delivery
+    # if `false` then no messages are sent
+    enabled: true
 
-  # which ZoneMTA queue to use by default. This mostly affects forwarded messages
-  zone: "default"
+    # which ZoneMTA queue to use by default. This mostly affects forwarded messages
+    zone: 'default'
 
-  # Collection name for GridFS storage
-  gfs: "mail"
+    # Collection name for GridFS storage
+    gfs: 'mail'
 
-  # Collection name for the queue
-  # see [dbs].sender option for choosing correct database to use for ZoneMTA queues
-  # by default the main wildduck database is used
-  collection: "zone-queue"
+    # Collection name for the queue
+    # see [dbs].sender option for choosing correct database to use for ZoneMTA queues
+    # by default the main wildduck database is used
+    collection: 'zone-queue'
 
 srs:
-  # must be shared with ZoneMTA SRS config, otherwise messages sent from ZoneMTA are not recognized by Haraka
-  secret: "secret value"
+    # must be shared with ZoneMTA SRS config, otherwise messages sent from ZoneMTA are not recognized by Haraka
+    secret: 'secret value'
 
 attachments:
-  type: "gridstore"
-  bucket: "attachments"
-  decodeBase64: true
+    type: 'gridstore'
+    bucket: 'attachments'
+    decodeBase64: true
 
 log:
-  authlogExpireDays: 30
+    authlogExpireDays: 30
 
 limits:
-  windowSize: 3600 # 1 hour
-  rcpt: 300 # allowed messages for the same recipient during window size
-  rcptIp: 100 # allowed messages for the same recipient from same IP during window size
+    windowSize: 3600 # 1 hour
+    rcptIp: 100 # allowed messages for the same recipient from same IP during window size
+    rcptWindowSize: 60 # 1 minute
+    rcpt: 60 # allowed messages for the same recipient during window size
 
 # do not process forwarding addresses for messages with the following spam score
 spamScoreForwarding: 10
 
 gelf:
-  enabled: false
-  component: 'mx'
-  options:
-    graylogPort: 12201
-    graylogHostname: '127.0.0.1'
-    connection: 'lan'
+    enabled: false
+    component: 'mx'
+    options:
+        graylogPort: 12201
+        graylogHostname: '127.0.0.1'
+        connection: 'lan'
