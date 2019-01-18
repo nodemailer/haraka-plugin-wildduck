@@ -782,6 +782,46 @@ exports.real_rcpt_handler = function(next, connection, params) {
 exports.hook_queue = function(next, connection) {
     let plugin = this;
 
+    let signedDomain = false;
+    plugin.loginfo('SPF ' + JSON.stringify(connection.results.get('spf')), plugin, connection);
+
+    // find domain that DKIM signed this message. Prefer header from, otherwise use envelope from
+    if (connection.transaction.notes.dkim_results) {
+        let dkimResults = Array.isArray(connection.transaction.notes.dkim_results)
+            ? connection.transaction.notes.dkim_results
+            : [].concat(connection.transaction.notes.dkim_results || []);
+
+        let envelopeFrom = connection.transaction.notes.sender;
+        let headerFrom = plugin.getHeaderFrom(connection);
+
+        let envelopeDomain = (envelopeFrom && envelopeFrom.split('@').pop()) || '';
+        let headerDomain = (headerFrom && headerFrom.address && headerFrom.address.split('@').pop()) || '';
+
+        plugin.loginfo('FROM ' + JSON.stringify({ envelope: envelopeFrom, header: headerFrom }), plugin, connection);
+
+        for (let dkimResult of dkimResults) {
+            plugin.loginfo('DKIM ' + JSON.stringify(dkimResult), plugin, connection);
+            if (dkimResult && dkimResult.result === 'pass') {
+                let domain = tools.normalizeDomain(dkimResult.domain);
+
+                if (headerDomain && domain === headerDomain) {
+                    signedDomain = headerDomain;
+                    break;
+                }
+
+                if (envelopeDomain && domain === envelopeDomain) {
+                    signedDomain = envelopeDomain;
+                    // do not break yet, maybe header domain result also exists
+                }
+            }
+        }
+
+        // no mathcing domain found, use the first valid one
+        if (!signedDomain && dkimResults.length) {
+            signedDomain = dkimResults[0].domain;
+        }
+    }
+
     const { forwards, autoreplies, users } = connection.transaction.notes.targets;
     let messageId = (connection.transaction.header.get('Message-Id') || '').toString();
     let subject = (connection.transaction.header.get('Subject') || '').toString();
@@ -1101,6 +1141,7 @@ exports.hook_queue = function(next, connection) {
                             chunks: collector.chunks,
                             chunklen: collector.chunklen,
                             disableAutoreply: !allowAutoreply.has(userData._id.toString()),
+                            signedDomain,
                             meta: {
                                 transactionId: connection.transaction.uuid,
                                 source: 'MX',
@@ -1359,6 +1400,35 @@ exports.updateRateLimit = function(connection, selector, key, limit, next) {
 
         return next(null, result.success);
     });
+};
+
+exports.getHeaderFrom = function(connection) {
+    let fromAddresses = new Map();
+    [].concat(connection.transaction.header.get_all('From') || []).forEach(entry => {
+        let walk = addresses => {
+            addresses.forEach(address => {
+                if (address.address) {
+                    let normalized = tools.normalizeAddress(address.address, false, { removeLabel: true });
+                    let uview = tools.uview(normalized);
+                    try {
+                        if (address.name) {
+                            address.name = libmime.decodeWords(address.name).trim();
+                        }
+                    } catch (E) {
+                        // failed to parse value
+                    }
+                    fromAddresses.set(uview, { address: normalized, provided: address });
+                } else if (address.group) {
+                    walk(address.group);
+                }
+            });
+        };
+        walk(addressparser(entry));
+    });
+
+    return Array.from(fromAddresses)
+        .map(entry => entry[1])
+        .shift();
 };
 
 exports.getHeaderAddresses = function(connection, next) {
