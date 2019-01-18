@@ -782,21 +782,23 @@ exports.real_rcpt_handler = function(next, connection, params) {
 exports.hook_queue = function(next, connection) {
     let plugin = this;
 
-    plugin.loginfo('TLS ' + JSON.stringify(connection.results.get('tls')), plugin, connection);
-    plugin.loginfo('SPF CONN ' + JSON.stringify(connection.results.get('spf')), plugin, connection);
-    plugin.loginfo('SPF TNX ' + JSON.stringify(connection.transaction.results.get('spf')), plugin, connection);
+    // results about verification (TLS, SPF, DKIM)
+    let verificationResults = {};
 
-    let senderDomain = false;
+    let tlsResults = connection.results.get('tls');
+    if (tlsResults && tlsResults.enabled) {
+        verificationResults.tls = tlsResults.cipher;
+    }
+
     // find domain that sent this message (SPF Pass)
     let spfResultsFrom = connection.transaction.results.get('spf');
     let spfResultsHelo = connection.transaction.results.get('spf');
     if (spfResultsFrom && spfResultsFrom.scope === 'mfrom' && spfResultsFrom.result === 'Pass') {
-        senderDomain = tools.normalizeDomain(spfResultsFrom.domain);
+        verificationResults.spf = tools.normalizeDomain(spfResultsFrom.domain);
     } else if (spfResultsHelo && spfResultsHelo.scope === 'helo' && spfResultsHelo.result === 'Pass') {
-        senderDomain = tools.normalizeDomain(spfResultsHelo.domain);
+        verificationResults.spf = tools.normalizeDomain(spfResultsHelo.domain);
     }
 
-    let signedDomain = false;
     // find domain that DKIM signed this message. Prefer header from, otherwise use envelope from
     if (connection.transaction.notes.dkim_results) {
         let dkimResults = Array.isArray(connection.transaction.notes.dkim_results)
@@ -817,22 +819,24 @@ exports.hook_queue = function(next, connection) {
                 let domain = tools.normalizeDomain(dkimResult.domain);
 
                 if (headerDomain && domain === headerDomain) {
-                    signedDomain = headerDomain;
+                    verificationResults.dkim = headerDomain;
                     break;
                 }
 
                 if (envelopeDomain && domain === envelopeDomain) {
-                    signedDomain = envelopeDomain;
+                    verificationResults.dkim = envelopeDomain;
                     // do not break yet, maybe header domain result also exists
                 }
             }
         }
 
         // no mathcing domain found, use the first valid one
-        if (!signedDomain && dkimResults.length) {
-            signedDomain = dkimResults[0].domain;
+        if (!verificationResults.dkim && dkimResults.length) {
+            verificationResults.dkim = dkimResults[0].domain;
         }
     }
+
+    plugin.loginfo('VERIFY ' + JSON.stringify(verificationResults), plugin, connection);
 
     const { forwards, autoreplies, users } = connection.transaction.notes.targets;
     let messageId = (connection.transaction.header.get('Message-Id') || '').toString();
@@ -1153,7 +1157,7 @@ exports.hook_queue = function(next, connection) {
                             chunks: collector.chunks,
                             chunklen: collector.chunklen,
                             disableAutoreply: !allowAutoreply.has(userData._id.toString()),
-                            signedDomain,
+                            verificationResults,
                             meta: {
                                 transactionId: connection.transaction.uuid,
                                 source: 'MX',
