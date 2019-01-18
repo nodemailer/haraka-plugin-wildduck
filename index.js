@@ -815,10 +815,7 @@ exports.hook_queue = function(next, connection) {
         let envelopeDomain = (envelopeFrom && envelopeFrom.split('@').pop()) || '';
         let headerDomain = (headerFrom && headerFrom.address && headerFrom.address.split('@').pop()) || '';
 
-        plugin.loginfo('FROM ' + JSON.stringify({ envelope: envelopeFrom, header: headerFrom }), plugin, connection);
-
         for (let dkimResult of dkimResults) {
-            plugin.loginfo('DKIM ' + JSON.stringify(dkimResult), plugin, connection);
             if (dkimResult && dkimResult.result === 'pass') {
                 let domain = tools.normalizeDomain(dkimResult.domain);
 
