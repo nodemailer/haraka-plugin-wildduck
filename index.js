@@ -783,7 +783,8 @@ exports.hook_queue = function(next, connection) {
     let plugin = this;
 
     let signedDomain = false;
-    plugin.loginfo('SPF ' + JSON.stringify(connection.results.get('spf')), plugin, connection);
+    plugin.loginfo('SPF CONN ' + JSON.stringify(connection.results.get('spf')), plugin, connection);
+    plugin.loginfo('SPF TNX ' + JSON.stringify(connection.transaction.results.get('spf')), plugin, connection);
 
     // find domain that DKIM signed this message. Prefer header from, otherwise use envelope from
     if (connection.transaction.notes.dkim_results) {
