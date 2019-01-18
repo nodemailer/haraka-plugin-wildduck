@@ -783,7 +783,11 @@ exports.hook_queue = function(next, connection) {
     let plugin = this;
 
     // results about verification (TLS, SPF, DKIM)
-    let verificationResults = {};
+    let verificationResults = {
+        tls: false,
+        spf: false,
+        dkim: false
+    };
 
     let tlsResults = connection.results.get('tls');
     if (tlsResults && tlsResults.enabled) {
@@ -835,8 +839,6 @@ exports.hook_queue = function(next, connection) {
             verificationResults.dkim = dkimResults[0].domain;
         }
     }
-
-    plugin.loginfo('VERIFY ' + JSON.stringify(verificationResults), plugin, connection);
 
     const { forwards, autoreplies, users } = connection.transaction.notes.targets;
     let messageId = (connection.transaction.header.get('Message-Id') || '').toString();
