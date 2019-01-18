@@ -782,10 +782,21 @@ exports.real_rcpt_handler = function(next, connection, params) {
 exports.hook_queue = function(next, connection) {
     let plugin = this;
 
-    let signedDomain = false;
+    plugin.loginfo('TLS ' + JSON.stringify(connection.results.get('tls')), plugin, connection);
     plugin.loginfo('SPF CONN ' + JSON.stringify(connection.results.get('spf')), plugin, connection);
     plugin.loginfo('SPF TNX ' + JSON.stringify(connection.transaction.results.get('spf')), plugin, connection);
 
+    let senderDomain = false;
+    // find domain that sent this message (SPF Pass)
+    let spfResultsFrom = connection.transaction.results.get('spf');
+    let spfResultsHelo = connection.transaction.results.get('spf');
+    if (spfResultsFrom && spfResultsFrom.scope === 'mfrom' && spfResultsFrom.result === 'Pass') {
+        senderDomain = tools.normalizeDomain(spfResultsFrom.domain);
+    } else if (spfResultsHelo && spfResultsHelo.scope === 'helo' && spfResultsHelo.result === 'Pass') {
+        senderDomain = tools.normalizeDomain(spfResultsHelo.domain);
+    }
+
+    let signedDomain = false;
     // find domain that DKIM signed this message. Prefer header from, otherwise use envelope from
     if (connection.transaction.notes.dkim_results) {
         let dkimResults = Array.isArray(connection.transaction.notes.dkim_results)
