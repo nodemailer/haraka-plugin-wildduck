@@ -831,6 +831,7 @@ exports.hook_queue = function(next, connection) {
     if (blacklisted) {
         let resp = plugin.dsnSpamResponse(connection, blacklisted.key);
         plugin.loginfo('OUT ' + require('util').inspect(resp, true, 5));
+        plugin.loginfo('OUT ' + require('util').inspect({ c: resp.constructor, n: resp.constructor.name }, true, 5));
         return next(DENY, resp);
     }
 
