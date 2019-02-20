@@ -9,7 +9,7 @@ process.env.DISABLE_WILD_CONFIG = 'true';
 const os = require('os');
 const ObjectID = require('mongodb').ObjectID;
 const db = require('./lib/db');
-const DSN = require('./dsn');
+const DSN = require('haraka-dsn');
 const punycode = require('punycode');
 const SRS = require('srs.js');
 const counters = require('wildduck/lib/counters');
@@ -31,6 +31,9 @@ DSN.rcpt_too_fast = () =>
         2,
         1
     );
+
+let defaultSpamRejectMessage =
+    'Our system has detected that this message is likely unsolicited mail.\nTo reduce the amount of spam this message has been blocked.';
 
 exports.register = function() {
     let plugin = this;
@@ -65,6 +68,7 @@ exports.open_database = function(server, next) {
     plugin.rspamd = plugin.cfg.rspamd || {};
     plugin.rspamd.forwardSkip = Number(plugin.rspamd.forwardSkip) || Number(plugin.cfg.spamScoreForwarding) || 0;
     plugin.rspamd.blacklist = [].concat(plugin.rspamd.blacklist || []);
+    plugin.rspamd.responses = plugin.rspamd.responses || {};
 
     plugin.hostname = (plugin.cfg.gelf && plugin.cfg.gelf.hostname) || os.hostname();
     plugin.gelf =
@@ -822,7 +826,10 @@ exports.real_rcpt_handler = function(next, connection, params) {
 exports.hook_queue = function(next, connection) {
     let plugin = this;
 
-    require('fs').writeFile('/tmp/rspamd', require('util').inspect(connection.transaction.results.get('rspamd'), false, 22), () => false);
+    let blacklisted = this.checkRspamdBlacklist(connection);
+    if (blacklisted) {
+        return next(DENY, plugin.dsnSpamResponse(connection, blacklisted.key));
+    }
 
     // results about verification (TLS, SPF, DKIM)
     let verificationResults = {
@@ -1564,9 +1571,28 @@ exports.checkRspamdBlacklist = function(connection) {
         return false;
     }
     for (let key of Object.keys(plugin.rspamd.blacklist)) {
-        if (key in rspamd && rspamd[key] !== 0) {
+        if (typeof rspamd[key] === 'number' && rspamd[key] > 0) {
             return { key, value: rspamd[key] };
         }
     }
     return false;
+};
+
+exports.dsnSpamResponse = function(connection, key) {
+    let plugin = this;
+    let message = plugin.rspamd.responses[key] || defaultSpamRejectMessage;
+
+    let domain;
+    message = message.toString().replace(/\{host\}/gi, () => {
+        if (domain) {
+            return domain;
+        }
+        let headerFrom = plugin.getHeaderFrom(connection) || connection.transaction.notes.sender || '';
+        domain = headerFrom.split('@').pop() || '-';
+        return domain;
+    });
+
+    return () => {
+        DSN.create(550, '550-5.7.1 ' + message, 7, 1);
+    };
 };

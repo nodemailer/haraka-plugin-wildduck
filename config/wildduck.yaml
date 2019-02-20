@@ -77,6 +77,10 @@ rspamd:
     # do not process forwarding addresses for messages with the following spam score
     forwardSkip: 10
 
-    # if a message has one of the tags listed here, it will be rejected
+    # if a message has one of the tags listed here with positive score, the message will be rejected
     blacklist:
         - DMARC_POLICY_REJECT
+
+    # define special responses
+    responses:
+        DMARC_POLICY_REJECT: 'Unauthenticated email from {host} is not accepted due to domain's DMARC policy'
