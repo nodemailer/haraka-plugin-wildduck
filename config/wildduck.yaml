@@ -65,9 +65,6 @@ limits:
     rcptWindowSize: 60 # 1 minute
     rcpt: 60 # allowed messages for the same recipient during window size
 
-# do not process forwarding addresses for messages with the following spam score
-spamScoreForwarding: 10
-
 gelf:
     enabled: false
     component: 'mx'
@@ -75,3 +72,11 @@ gelf:
         graylogPort: 12201
         graylogHostname: '127.0.0.1'
         connection: 'lan'
+
+rspamd:
+    # do not process forwarding addresses for messages with the following spam score
+    forwardSkip: 10
+
+    # if a message has one of the tags listed here, it will be rejected
+    blacklist:
+        - DMARC_POLICY_REJECT

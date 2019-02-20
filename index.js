@@ -62,6 +62,10 @@ exports.open_database = function(server, next) {
         secret: plugin.cfg.srs.secret
     });
 
+    plugin.rspamd = plugin.cfg.rspamd || {};
+    plugin.rspamd.forwardSkip = Number(plugin.rspamd.forwardSkip) || Number(plugin.cfg.spamScoreForwarding) || 0;
+    plugin.rspamd.blacklist = [].concat(plugin.rspamd.blacklist || []);
+
     plugin.hostname = (plugin.cfg.gelf && plugin.cfg.gelf.hostname) || os.hostname();
     plugin.gelf =
         plugin.cfg.gelf && plugin.cfg.gelf.enabled
@@ -99,37 +103,33 @@ exports.open_database = function(server, next) {
     };
 
     let createConnection = done => {
-        db.connect(
-            server.notes.redis,
-            plugin.cfg,
-            (err, db) => {
-                if (err) {
-                    return done(err);
-                }
-                plugin.db = db;
-                plugin.ttlcounter = counters(db.redis).ttlcounter;
-
-                plugin.db.messageHandler.loggelf = message => plugin.loggelf(message);
-                plugin.db.userHandler.loggelf = message => plugin.loggelf(message);
-
-                plugin.maildrop = new Maildropper({
-                    db,
-                    enabled: plugin.cfg.sender.enabled,
-                    zone: plugin.cfg.sender.zone,
-                    collection: plugin.cfg.sender.collection,
-                    gfs: plugin.cfg.sender.gfs
-                });
-
-                plugin.filterHandler = new FilterHandler({
-                    db,
-                    sender: plugin.cfg.sender,
-                    messageHandler: plugin.db.messageHandler,
-                    loggelf: message => plugin.loggelf(message)
-                });
-
-                done();
+        db.connect(server.notes.redis, plugin.cfg, (err, db) => {
+            if (err) {
+                return done(err);
             }
-        );
+            plugin.db = db;
+            plugin.ttlcounter = counters(db.redis).ttlcounter;
+
+            plugin.db.messageHandler.loggelf = message => plugin.loggelf(message);
+            plugin.db.userHandler.loggelf = message => plugin.loggelf(message);
+
+            plugin.maildrop = new Maildropper({
+                db,
+                enabled: plugin.cfg.sender.enabled,
+                zone: plugin.cfg.sender.zone,
+                collection: plugin.cfg.sender.collection,
+                gfs: plugin.cfg.sender.gfs
+            });
+
+            plugin.filterHandler = new FilterHandler({
+                db,
+                sender: plugin.cfg.sender,
+                messageHandler: plugin.db.messageHandler,
+                loggelf: message => plugin.loggelf(message)
+            });
+
+            done();
+        });
     };
 
     let returned = false;
@@ -177,6 +177,46 @@ exports.init_wildduck_shared = function(next, server) {
     let plugin = this;
 
     plugin.open_database(server, next);
+};
+
+exports.hook_deny = function(next, connection, params) {
+    let plugin = this;
+
+    let rcpts = connection.transaction.rcpt_to || [];
+    if (!rcpts.length) {
+        rcpts = [false];
+    }
+
+    for (let rcpt of rcpts) {
+        let user;
+        let address = (rcpt && rcpt.address()) || false;
+
+        if (connection.transaction.notes.targets && connection.transaction.notes.targets.users) {
+            // try to resolve user id for the recipient address
+            for (let target of connection.transaction.notes.targets.users) {
+                let uid = target[0];
+                let info = target[1];
+                if (info && info.recipient === address) {
+                    user = uid;
+                }
+            }
+        }
+
+        plugin.loggelf({
+            short_message: '[DENY:' + connection.transaction.notes.sender + '] ' + connection.transaction.uuid,
+            _mail_action: 'deny',
+            _from: connection.transaction.notes.sender,
+            _queue_id: connection.transaction.uuid,
+            _ip: connection.remote_ip,
+            _proto: connection.transaction.notes.transmissionType,
+            _to: address,
+            _user: user,
+            _error: params && params[1],
+            _rejector: params && params[2]
+        });
+    }
+
+    next();
 };
 
 exports.hook_mail = function(next, connection, params) {
@@ -782,6 +822,8 @@ exports.real_rcpt_handler = function(next, connection, params) {
 exports.hook_queue = function(next, connection) {
     let plugin = this;
 
+    require('fs').writeFile('/tmp/rspamd', require('util').inspect(connection.transaction.results.get('rspamd'), false, 22), () => false);
+
     // results about verification (TLS, SPF, DKIM)
     let verificationResults = {
         tls: false,
@@ -927,9 +969,9 @@ exports.hook_queue = function(next, connection) {
             }
 
             let rspamd = connection.transaction.results.get('rspamd');
-            if (rspamd && rspamd.score && plugin.cfg.spamScoreForwarding && rspamd.score >= plugin.cfg.spamScoreForwarding) {
+            if (rspamd && rspamd.score && plugin.rspamd.forwardSkip && rspamd.score >= plugin.rspamd.forwardSkip) {
                 // do not forward spam messages
-                plugin.loginfo('FORWARDSKIP score=' + JSON.stringify(rspamd.score) + ' required=' + plugin.cfg.spamScoreForwarding, plugin, connection);
+                plugin.loginfo('FORWARDSKIP score=' + JSON.stringify(rspamd.score) + ' required=' + plugin.rspamd.forwardSkip, plugin, connection);
 
                 sendLogEntry({
                     short_message: '[Skip forward] ' + connection.transaction.uuid,
@@ -937,7 +979,7 @@ exports.hook_queue = function(next, connection) {
                     _forward_skipped: 'yes',
                     _spam_score: rspamd.score,
                     _spam_action: rspamd ? rspamd.action : '',
-                    _spam_allowed: plugin.cfg.spamScoreForwarding
+                    _spam_allowed: plugin.rspamd.forwardSkip
                 });
 
                 return collectData(done);
@@ -1513,4 +1555,18 @@ exports.getHeaderAddresses = function(connection, next) {
                 cc: ccAddresses
             });
         });
+};
+
+exports.checkRspamdBlacklist = function(connection) {
+    let plugin = this;
+    let rspamd = connection.transaction.results.get('rspamd');
+    if (!rspamd) {
+        return false;
+    }
+    for (let key of Object.keys(plugin.rspamd.blacklist)) {
+        if (key in rspamd && rspamd[key] !== 0) {
+            return { key, value: rspamd[key] };
+        }
+    }
+    return false;
 };
