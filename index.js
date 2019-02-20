@@ -1594,7 +1594,5 @@ exports.dsnSpamResponse = function(connection, key) {
         return domain;
     });
 
-    return () => {
-        DSN.create(550, '550-5.7.1 ' + message, 7, 1);
-    };
+    return DSN.create(550, '550-5.7.1 ' + message, 7, 1);
 };
