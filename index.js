@@ -1590,7 +1590,7 @@ exports.dsnSpamResponse = function(connection, key) {
             return domain;
         }
         let headerFrom = plugin.getHeaderFrom(connection) || connection.transaction.notes.sender || '';
-        domain = headerFrom.split('@').pop() || '-';
+        domain = (headerFrom && headerFrom.address && headerFrom.address.split('@').pop()) || '-';
         return domain;
     });
 
