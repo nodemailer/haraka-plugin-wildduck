@@ -27,7 +27,7 @@ const libmime = require('libmime');
 DSN.rcpt_too_fast = () =>
     DSN.create(
         450,
-        '450-4.2.1 The user you are trying to contact is receiving mail at a rate that\nprevents additional messages from being delivered. Please resend your\nmessage at a later time. If the user is able to receive mail at that\ntime, your message will be delivered.',
+        'The user you are trying to contact is receiving mail at a rate that\nprevents additional messages from being delivered. Please resend your\nmessage at a later time. If the user is able to receive mail at that\ntime, your message will be delivered.',
         2,
         1
     );
@@ -829,7 +829,8 @@ exports.hook_queue = function(next, connection) {
     let blacklisted = this.checkRspamdBlacklist(connection);
     plugin.loginfo('BLRES all=' + JSON.stringify(plugin.rspamd.blacklist) + ' bl=' + JSON.stringify(blacklisted), plugin, connection);
     if (blacklisted) {
-        return next(DENY, plugin.dsnSpamResponse(connection, blacklisted.key));
+        //return next(DENY, plugin.dsnSpamResponse(connection, blacklisted.key));
+        return next(DENY, DSN.rcpt_too_fast());
     }
 
     // results about verification (TLS, SPF, DKIM)
@@ -1594,7 +1595,7 @@ exports.dsnSpamResponse = function(connection, key) {
         return domain;
     });
 
-    plugin.loginfo(JSON.stringify([550, '550-5.7.1 ' + message, 7, 1]));
+    plugin.loginfo(JSON.stringify([550, message, 7, 1]));
 
-    return DSN.create(550, '550-5.7.1 ' + message, 7, 1);
+    return DSN.create(550, message, 7, 1);
 };
