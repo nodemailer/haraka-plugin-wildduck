@@ -62,7 +62,7 @@ exports.open_database = function(server, next) {
     let plugin = this;
 
     plugin.srsRewriter = new SRS({
-        secret: plugin.cfg.srs.secret
+        secret: (plugin.cfg.srs && plugin.cfg.srs.secret) || 'secret'
     });
 
     plugin.rspamd = plugin.cfg.rspamd || {};
