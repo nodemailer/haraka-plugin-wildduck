@@ -1572,6 +1572,7 @@ exports.checkRspamdBlacklist = function(connection) {
         return false;
     }
     for (let key of Object.keys(plugin.rspamd.blacklist)) {
+        plugin.loginfo('BLRES key=' + key + ' type=' + typeof rspamd[key] + ' value=' + rspamd[key], plugin, connection);
         if (typeof rspamd[key] === 'number' && rspamd[key] > 0) {
             return { key, value: rspamd[key] };
         }
