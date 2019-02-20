@@ -827,6 +827,7 @@ exports.hook_queue = function(next, connection) {
     let plugin = this;
 
     let blacklisted = this.checkRspamdBlacklist(connection);
+    plugin.loginfo('BLRES all=' + JSON.stringify(plugin.rspamd.blacklist) + ' bl=' + JSON.stringify(blacklisted), plugin, connection);
     if (blacklisted) {
         return next(DENY, plugin.dsnSpamResponse(connection, blacklisted.key));
     }
