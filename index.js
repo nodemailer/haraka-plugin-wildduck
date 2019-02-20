@@ -829,7 +829,8 @@ exports.hook_queue = function(next, connection) {
     let blacklisted = this.checkRspamdBlacklist(connection);
     plugin.loginfo('BLRES all=' + JSON.stringify(plugin.rspamd.blacklist) + ' bl=' + JSON.stringify(blacklisted), plugin, connection);
     if (blacklisted) {
-        return next(DENY, plugin.dsnSpamResponse(connection, blacklisted.key));
+        // can not send DSN object for hook_queue as it is converted to [object Object]
+        return next(DENY, plugin.dsnSpamResponse(connection, blacklisted.key).reply);
     }
 
     // results about verification (TLS, SPF, DKIM)
