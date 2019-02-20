@@ -1569,13 +1569,15 @@ exports.getHeaderAddresses = function(connection, next) {
 exports.checkRspamdBlacklist = function(connection) {
     let plugin = this;
     let rspamd = connection.transaction.results.get('rspamd');
-    if (!rspamd) {
+    let symbols = (rspamd && rspamd.symbols) || rspamd;
+
+    if (!symbols) {
         return false;
     }
+
     for (let key of plugin.rspamd.blacklist) {
-        plugin.loginfo('BLRES key=' + key + ' type=' + typeof rspamd[key] + ' value=' + rspamd[key], plugin, connection);
-        if (typeof rspamd[key] === 'number' && rspamd[key] > 0) {
-            return { key, value: rspamd[key] };
+        if (typeof symbols[key] === 'number' && symbols[key] > 0) {
+            return { key, value: symbols[key] };
         }
     }
     return false;
