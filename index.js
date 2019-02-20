@@ -830,7 +830,7 @@ exports.hook_queue = function(next, connection) {
     plugin.loginfo('BLRES all=' + JSON.stringify(plugin.rspamd.blacklist) + ' bl=' + JSON.stringify(blacklisted), plugin, connection);
     if (blacklisted) {
         //return next(DENY, plugin.dsnSpamResponse(connection, blacklisted.key));
-        return next(DENY, DSN.rcpt_too_fast());
+        return next(DENY, DSN.addr_unspecified());
     }
 
     // results about verification (TLS, SPF, DKIM)
