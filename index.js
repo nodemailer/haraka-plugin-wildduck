@@ -216,7 +216,7 @@ exports.hook_deny = function(next, connection, params) {
             _to: address,
             _user: user,
             _rejector: params && params[2],
-            _reject_code: connection.transaction.notes.rejectCode
+            _reject_code: connection.transaction.notes.rejectCode || (params && params[2]) || 'UNKNOWN'
         };
 
         let headerFrom = plugin.getHeaderFrom(connection);
@@ -1418,6 +1418,7 @@ exports.hook_queue = function(next, connection) {
                                     );
                                 }
 
+                                connection.transaction.notes.rejectCode = response.error.code;
                                 return next(response.error.code === 'DroppedByPolicy' ? DENY : DENYSOFT, response.error.message);
                             }
 
