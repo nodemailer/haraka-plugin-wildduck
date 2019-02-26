@@ -210,7 +210,6 @@ exports.hook_deny = function(next, connection, params) {
             short_message: '[DENY:' + connection.transaction.notes.sender + '] ' + connection.transaction.uuid,
             _mail_action: 'deny',
             _from: connection.transaction.notes.sender,
-            _header_from: plugin.getHeaderFrom(connection),
             _queue_id: connection.transaction.uuid,
             _ip: connection.remote_ip,
             _proto: connection.transaction.notes.transmissionType,
@@ -219,6 +218,12 @@ exports.hook_deny = function(next, connection, params) {
             _rejector: params && params[2],
             _reject_code: connection.transaction.notes.rejectCode
         };
+
+        let headerFrom = plugin.getHeaderFrom(connection);
+        if (headerFrom) {
+            logdata._header_from_address = headerFrom.address;
+            logdata._header_from_value = connection.transaction.header.get_all('From').join('; ');
+        }
 
         let err = params && params[1];
         if (typeof err === 'string') {
