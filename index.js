@@ -206,18 +206,34 @@ exports.hook_deny = function(next, connection, params) {
             }
         }
 
-        plugin.loggelf({
+        let logdata = {
             short_message: '[DENY:' + connection.transaction.notes.sender + '] ' + connection.transaction.uuid,
             _mail_action: 'deny',
             _from: connection.transaction.notes.sender,
+            _header_from: plugin.getHeaderFrom(connection),
             _queue_id: connection.transaction.uuid,
             _ip: connection.remote_ip,
             _proto: connection.transaction.notes.transmissionType,
             _to: address,
             _user: user,
-            _error: params && params[1],
-            _rejector: params && params[2]
-        });
+            _rejector: params && params[2],
+            _reject_code: connection.transaction.notes.rejectCode
+        };
+
+        let err = params && params[1];
+        if (typeof err === 'string') {
+            logdata._error = err;
+        } else if (err && typeof err === 'object') {
+            Object.keys(err).forEach(key => {
+                if (key === 'msg') {
+                    logdata._error = err[key];
+                } else {
+                    logdata['_error_' + key] = err[key];
+                }
+            });
+        }
+
+        plugin.loggelf(logdata);
     }
 
     next();
@@ -277,6 +293,7 @@ exports.hook_rcpt = function(next, connection, params) {
                 let err = args && args[0];
                 if (err && /Error$/.test(err.name)) {
                     plugin.logerror(err, plugin, connection);
+                    connection.transaction.notes.rejectCode = 'ERRC01';
                     return next(DENYSOFT, 'Failed to process recipient, try again [ERRC01]');
                 }
                 next(...args);
@@ -299,6 +316,7 @@ exports.hook_rcpt = function(next, connection, params) {
             }
             clearTimeout(waitTimeout);
             returned = true;
+            connection.transaction.notes.rejectCode = 'ERRC02';
             return next(DENYSOFT, 'Failed to process recipient, try again [ERRC02]');
         }
         runHandler();
@@ -310,6 +328,7 @@ exports.hook_rcpt = function(next, connection, params) {
             return;
         }
         returned = true;
+        connection.transaction.notes.rejectCode = 'ERRC03';
         return next(DENYSOFT, 'Failed to process recipient, try again [ERRC03]');
     }, 8 * 1000);
 
@@ -324,6 +343,7 @@ exports.real_rcpt_handler = function(next, connection, params) {
     let rcpt = params[0];
     if (/\*/.test(rcpt.user)) {
         // Using * is not allowed in addresses
+        connection.transaction.notes.rejectCode = 'NO_SUCH_USER';
         return next(DENY, DSN.no_such_user());
     }
 
@@ -374,6 +394,7 @@ exports.real_rcpt_handler = function(next, connection, params) {
                     _srs: 'yes',
                     _error: 'missing domain'
                 };
+                connection.transaction.notes.rejectCode = 'NO_SUCH_USER';
                 return hookDone(DENY, DSN.no_such_user());
             }
 
@@ -388,6 +409,7 @@ exports.real_rcpt_handler = function(next, connection, params) {
                 _error: 'srs check failed',
                 _err_code: err.code
             };
+            connection.transaction.notes.rejectCode = 'NO_SUCH_USER';
             return hookDone(DENY, DSN.no_such_user());
         }
 
@@ -418,6 +440,7 @@ exports.real_rcpt_handler = function(next, connection, params) {
                         _selector: selector,
                         _error: 'too many attempts'
                     };
+                    connection.transaction.notes.rejectCode = 'RATE_LIMIT';
                     return hookDone(DENYSOFT, DSN.rcpt_too_fast());
                 }
 
@@ -481,6 +504,7 @@ exports.real_rcpt_handler = function(next, connection, params) {
                         _selector: 'user',
                         _error: 'too many attempts'
                     };
+                    connection.transaction.notes.rejectCode = 'RATE_LIMIT';
                     return hookDone(DENYSOFT, DSN.rcpt_too_fast());
                 }
 
@@ -564,7 +588,8 @@ exports.real_rcpt_handler = function(next, connection, params) {
                                 pubKey: true,
                                 spamLevel: true,
                                 storageUsed: true,
-                                quota: true
+                                quota: true,
+                                audit: true
                             }
                         },
                         (err, userData) => {
@@ -621,6 +646,49 @@ exports.real_rcpt_handler = function(next, connection, params) {
         );
     };
 
+    let checkIpRateLimit = (userData, done) => {
+        if (!connection.remote.ip) {
+            return done();
+        }
+
+        let key = connection.remote.ip + ':' + userData._id.toString();
+        let selector = 'rcptIp';
+        plugin.checkRateLimit(connection, selector, key, false, (err, success) => {
+            if (err) {
+                resolution = {
+                    full_message: err.stack,
+                    _rate_limit: 'yes',
+                    _selector: selector,
+                    _user: userData._id.toString(),
+                    _default_address: rcpt.address() !== userData._address ? userData._address : '',
+
+                    _error: 'rate limit check failed',
+                    _failure: 'yes',
+                    _err_code: err.code
+                };
+                err.code = err.code || 'RateLimit';
+                return hookDone(err);
+            }
+
+            if (!success) {
+                resolution = {
+                    _rate_limit: 'yes',
+                    _selector: selector,
+                    _error: 'too many attempts',
+                    _user: userData._id.toString(),
+                    _default_address: rcpt.address() !== userData._address ? userData._address : ''
+                };
+                connection.transaction.notes.rejectCode = 'RATE_LIMIT';
+                return hookDone(DENYSOFT, DSN.rcpt_too_fast());
+            }
+
+            // update rate limit for this address after delivery
+            connection.transaction.notes.rateKeys.push({ selector, key });
+
+            return done();
+        });
+    };
+
     plugin.db.userHandler.resolveAddress(
         address,
         {
@@ -659,6 +727,7 @@ exports.real_rcpt_handler = function(next, connection, params) {
                     _error: 'no such user',
                     _unknwon_user: 'yes'
                 };
+                connection.transaction.notes.rejectCode = 'NO_SUCH_USER';
                 return hookDone(DENY, DSN.no_such_user());
             }
 
@@ -699,6 +768,7 @@ exports.real_rcpt_handler = function(next, connection, params) {
                             _error: 'no such user',
                             _unknwon_user: 'yes'
                         };
+                        connection.transaction.notes.rejectCode = 'NO_SUCH_USER';
                         return hookDone(DENY, DSN.no_such_user());
                     }
 
@@ -709,6 +779,7 @@ exports.real_rcpt_handler = function(next, connection, params) {
                             _error: 'disabled user',
                             _disabled_user: 'yes'
                         };
+                        connection.transaction.notes.rejectCode = 'MBOX_DISABLED';
                         return hookDone(DENY, DSN.mbox_disabled());
                     }
 
@@ -723,52 +794,11 @@ exports.real_rcpt_handler = function(next, connection, params) {
                             _over_quota: 'yes',
                             _default_address: rcpt.address() !== userData._address ? userData._address : ''
                         };
+                        connection.transaction.notes.rejectCode = 'MBOX_FULL';
                         return hookDone(DENY, DSN.mbox_full());
                     }
 
-                    let checkIpRateLimit = done => {
-                        if (!connection.remote.ip) {
-                            return done();
-                        }
-
-                        let key = connection.remote.ip + ':' + userData._id.toString();
-                        let selector = 'rcptIp';
-                        plugin.checkRateLimit(connection, selector, key, false, (err, success) => {
-                            if (err) {
-                                resolution = {
-                                    full_message: err.stack,
-                                    _rate_limit: 'yes',
-                                    _selector: selector,
-                                    _user: userData._id.toString(),
-                                    _default_address: rcpt.address() !== userData._address ? userData._address : '',
-
-                                    _error: 'rate limit check failed',
-                                    _failure: 'yes',
-                                    _err_code: err.code
-                                };
-                                err.code = err.code || 'RateLimit';
-                                return hookDone(err);
-                            }
-
-                            if (!success) {
-                                resolution = {
-                                    _rate_limit: 'yes',
-                                    _selector: selector,
-                                    _error: 'too many attempts',
-                                    _user: userData._id.toString(),
-                                    _default_address: rcpt.address() !== userData._address ? userData._address : ''
-                                };
-                                return hookDone(DENYSOFT, DSN.rcpt_too_fast());
-                            }
-
-                            // update rate limit for this address after delivery
-                            connection.transaction.notes.rateKeys.push({ selector, key });
-
-                            return done();
-                        });
-                    };
-
-                    checkIpRateLimit(() => {
+                    checkIpRateLimit(userData, () => {
                         let key = userData._id.toString();
                         let selector = 'rcpt';
                         plugin.checkRateLimit(connection, selector, key, userData.receivedMax, (err, success) => {
@@ -796,6 +826,7 @@ exports.real_rcpt_handler = function(next, connection, params) {
                                     _user: userData._id.toString(),
                                     _default_address: rcpt.address() !== userData._address ? userData._address : ''
                                 };
+                                connection.transaction.notes.rejectCode = 'RATE_LIMIT';
                                 return hookDone(DENYSOFT, DSN.rcpt_too_fast());
                             }
 
@@ -830,6 +861,7 @@ exports.hook_queue = function(next, connection) {
     plugin.loginfo('BLRES all=' + JSON.stringify(plugin.rspamd.blacklist) + ' bl=' + JSON.stringify(blacklisted), plugin, connection);
     if (blacklisted) {
         // can not send DSN object for hook_queue as it is converted to [object Object]
+        connection.transaction.notes.rejectCode = blacklisted.key;
         return next(DENY, plugin.dsnSpamResponse(connection, blacklisted.key).reply);
     }
 
@@ -939,6 +971,7 @@ exports.hook_queue = function(next, connection) {
                 _failure: 'yes',
                 _err_code: err.code
             });
+            connection.transaction.notes.rejectCode = 'ERRQ01';
             return next(DENYSOFT, 'Failed to queue message [ERRQ01]');
         });
 
@@ -954,6 +987,7 @@ exports.hook_queue = function(next, connection) {
                 _failure: 'yes',
                 _err_code: err.code
             });
+            connection.transaction.notes.rejectCode = 'ERRQ02';
             return next(DENYSOFT, 'Failed to queue message [ERRQ02]');
         }
 
@@ -1026,6 +1060,7 @@ exports.hook_queue = function(next, connection) {
                             _failure: 'yes',
                             _err_code: err.code
                         });
+                        connection.transaction.notes.rejectCode = 'ERRQ03';
                         return next(DENYSOFT, 'Failed to queue message [ERRQ03]');
                     }
                     return done(err, ...args);
@@ -1069,6 +1104,7 @@ exports.hook_queue = function(next, connection) {
                         _failure: 'yes',
                         _err_code: err.code
                     });
+                    connection.transaction.notes.rejectCode = 'ERRQ04';
                     return next(DENYSOFT, 'Failed to queue message [ERRQ04]');
                 });
 
@@ -1238,6 +1274,7 @@ exports.hook_queue = function(next, connection) {
                                 // we can fail the message even if some recipients were already processed
                                 // as redelivery would not be a problem - duplicate deliveries are ignored (filters are rerun though).
                                 plugin.loginfo('DEFERRED rcpt=' + recipient + ' error=' + err.message, plugin, connection);
+                                connection.transaction.notes.rejectCode = 'ERRQ05';
                                 return next(DENYSOFT, 'Failed to queue message [ERRQ05]');
                             }
 
@@ -1596,8 +1633,6 @@ exports.dsnSpamResponse = function(connection, key) {
         domain = (headerFrom && headerFrom.address && headerFrom.address.split('@').pop()) || '-';
         return domain;
     });
-
-    plugin.loginfo(JSON.stringify([550, message, 7, 1]));
 
     return DSN.create(550, message, 7, 1);
 };
