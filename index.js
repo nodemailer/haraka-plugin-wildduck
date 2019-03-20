@@ -863,7 +863,6 @@ exports.hook_queue = function(next, connection) {
     let plugin = this;
 
     let blacklisted = this.checkRspamdBlacklist(connection);
-    plugin.loginfo('BLRES all=' + JSON.stringify(plugin.rspamd.blacklist) + ' bl=' + JSON.stringify(blacklisted), plugin, connection);
     if (blacklisted) {
         // can not send DSN object for hook_queue as it is converted to [object Object]
         connection.transaction.notes.rejectCode = blacklisted.key;
