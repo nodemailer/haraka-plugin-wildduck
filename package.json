@@ -38,9 +38,9 @@
         "haraka-dsn": "^1.0.2",
         "ioredis": "4.6.2",
         "libmime": "4.0.1",
-        "mongodb": "3.1.13",
+        "mongodb": "3.2.1",
         "nodemailer": "5.1.1",
         "srs.js": "0.1.0",
-        "wildduck": "1.15.1"
+        "wildduck": "1.15.2"
     }
 }
