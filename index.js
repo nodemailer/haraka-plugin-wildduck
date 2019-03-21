@@ -1262,6 +1262,11 @@ exports.hook_queue = function(next, connection) {
                             }
                         },
                         (err, response, preparedResponse) => {
+                            if (!prepared && preparedResponse) {
+                                // reuse parsed message structure
+                                prepared = preparedResponse;
+                            }
+
                             if (err) {
                                 sendLogEntry({
                                     full_message: err.stack,
@@ -1275,8 +1280,7 @@ exports.hook_queue = function(next, connection) {
                                     _err_code: err.code
                                 });
 
-                                // we can fail the message even if some recipients were already processed
-                                // as redelivery would not be a problem - duplicate deliveries are ignored (filters are rerun though).
+                                // might be an isse to reject if some recipients were already processed
                                 plugin.loginfo('DEFERRED rcpt=' + recipient + ' error=' + err.message, plugin, connection);
                                 connection.transaction.notes.rejectCode = 'ERRQ05';
                                 return next(DENYSOFT, 'Failed to queue message [ERRQ05]');
@@ -1375,6 +1379,8 @@ exports.hook_queue = function(next, connection) {
                             }
 
                             if (response && response.error) {
+                                connection.transaction.notes.rejectCode = response.error.code;
+
                                 if (response.error.code === 'DroppedByPolicy') {
                                     sendLogEntry({
                                         full_message: response.error.message,
@@ -1395,30 +1401,32 @@ exports.hook_queue = function(next, connection) {
                                         plugin,
                                         connection
                                     );
-                                } else {
-                                    sendLogEntry({
-                                        full_message: response.error.stack,
 
-                                        _user: userData._id.toString(),
-                                        _to: recipient,
-                                        _filter: filterMessages.length ? filterMessages.join('\n') : '',
-                                        _filter_is_spam: isSpam ? 'yes' : 'no',
-                                        _filters_matching: matchingFilters ? matchingFilters.join('\n') : '',
-
-                                        _no_store: 'yes',
-                                        _error: 'failed to store message',
-                                        _failure: 'yes',
-                                        _err_code: response.error.code
-                                    });
-                                    plugin.loginfo(
-                                        'DEFERRED rcpt=' + recipient + ' user=' + userData.address + '[' + userData._id + '] error=' + response.error.message,
-                                        plugin,
-                                        connection
-                                    );
+                                    // appears as accepted
+                                    return setImmediate(storeNext);
                                 }
 
-                                connection.transaction.notes.rejectCode = response.error.code;
-                                return next(response.error.code === 'DroppedByPolicy' ? DENY : DENYSOFT, response.error.message);
+                                sendLogEntry({
+                                    full_message: response.error.stack,
+
+                                    _user: userData._id.toString(),
+                                    _to: recipient,
+                                    _filter: filterMessages.length ? filterMessages.join('\n') : '',
+                                    _filter_is_spam: isSpam ? 'yes' : 'no',
+                                    _filters_matching: matchingFilters ? matchingFilters.join('\n') : '',
+
+                                    _no_store: 'yes',
+                                    _error: 'failed to store message',
+                                    _failure: 'yes',
+                                    _err_code: response.error.code
+                                });
+                                plugin.loginfo(
+                                    'DEFERRED rcpt=' + recipient + ' user=' + userData.address + '[' + userData._id + '] error=' + response.error.message,
+                                    plugin,
+                                    connection
+                                );
+
+                                return next(DENYSOFT, response.error.message);
                             }
 
                             sendLogEntry({
@@ -1438,11 +1446,6 @@ exports.hook_queue = function(next, connection) {
                                 plugin,
                                 connection
                             );
-
-                            if (!prepared && preparedResponse) {
-                                // reuse parsed message structure
-                                prepared = preparedResponse;
-                            }
 
                             setImmediate(storeNext);
                         }
