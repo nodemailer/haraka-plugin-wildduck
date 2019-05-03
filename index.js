@@ -454,7 +454,7 @@ exports.real_rcpt_handler = function(next, connection, params) {
 
                 plugin.loginfo('SRS USING rcpt=' + address + ' target=' + reversed, plugin, connection);
 
-                forwards.set(reversed, { type: 'mail', value: reversed });
+                forwards.set(reversed, { type: 'mail', value: reversed, recipient: rcpt.address() });
 
                 resolution = {
                     _srs: 'yes',
