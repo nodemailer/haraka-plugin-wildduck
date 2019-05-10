@@ -861,6 +861,7 @@ exports.real_rcpt_handler = function(next, connection, params) {
 
 exports.hook_queue = function(next, connection) {
     let plugin = this;
+    let queueId = connection.transaction.uuid;
 
     let blacklisted = this.checkRspamdBlacklist(connection);
     if (blacklisted) {
@@ -939,9 +940,9 @@ exports.hook_queue = function(next, connection) {
             }
 
             let message = {
-                short_message: '[PROCESS] ' + connection.transaction.uuid,
+                short_message: '[PROCESS] ' + queueId,
                 _mail_action: 'process',
-                _queue_id: connection.transaction.uuid,
+                _queue_id: queueId,
                 _message_id: messageId.replace(/^[\s<]+|[\s>]+$/g, ''),
                 _spam_score: rspamd ? rspamd.score : '',
                 _spam_action: rspamd ? rspamd.action : '',
@@ -1021,7 +1022,7 @@ exports.hook_queue = function(next, connection) {
                 plugin.loginfo('FORWARDSKIP score=' + JSON.stringify(rspamd.score) + ' required=' + plugin.rspamd.forwardSkip, plugin, connection);
 
                 sendLogEntry({
-                    short_message: '[Skip forward] ' + connection.transaction.uuid,
+                    short_message: '[Skip forward] ' + queueId,
                     _mail_action: 'forward',
                     _forward_skipped: 'yes',
                     _spam_score: rspamd.score,
@@ -1071,7 +1072,7 @@ exports.hook_queue = function(next, connection) {
                 }
 
                 sendLogEntry({
-                    short_message: '[Queued forward] ' + connection.transaction.uuid,
+                    short_message: '[Queued forward] ' + queueId,
                     _mail_action: 'forward',
                     _target_queue_id: args[0].id,
                     _target_address: (targets || []).map(target => ((target && target.value) || target).toString().replace(/\?.*$/, '')).join('\n')
@@ -1082,7 +1083,7 @@ exports.hook_queue = function(next, connection) {
 
                     short_message: '[QUEUED] ' + args[0].id,
 
-                    _parent_queue_id: connection.transaction.uuid,
+                    _parent_queue_id: queueId,
                     _from: connection.transaction.notes.sender,
                     _to: (targets || []).map(target => ((target && target.value) || target).toString().replace(/\?.*$/, '')).join('\n'),
 
@@ -1151,7 +1152,7 @@ exports.hook_queue = function(next, connection) {
                 autoreply(
                     {
                         db: plugin.db,
-                        queueId: connection.transaction.uuid,
+                        queueId,
                         maildrop: plugin.maildrop,
                         sender: connection.transaction.notes.sender,
                         recipient: addressData.address,
@@ -1171,7 +1172,7 @@ exports.hook_queue = function(next, connection) {
                         }
 
                         sendLogEntry({
-                            short_message: '[Queued autoreply] ' + connection.transaction.uuid,
+                            short_message: '[Queued autoreply] ' + queueId,
                             _mail_action: 'autoreply',
                             _target_queue_id: args[0].id,
                             _target_address: addressData.address
@@ -1182,7 +1183,7 @@ exports.hook_queue = function(next, connection) {
 
                             short_message: '[QUEUED] ' + args[0].id,
 
-                            _parent_queue_id: connection.transaction.uuid,
+                            _parent_queue_id: queueId,
                             _from: addressData.address,
                             _to: addressData.address,
 
@@ -1249,7 +1250,7 @@ exports.hook_queue = function(next, connection) {
                             disableAutoreply: !allowAutoreply.has(userData._id.toString()),
                             verificationResults,
                             meta: {
-                                transactionId: connection.transaction.uuid,
+                                transactionId: queueId,
                                 source: 'MX',
                                 from: connection.transaction.notes.sender,
                                 to: [recipient],
@@ -1295,7 +1296,7 @@ exports.hook_queue = function(next, connection) {
                                 response.filterResults.forEach(entry => {
                                     if (entry.forward) {
                                         sendLogEntry({
-                                            short_message: '[Queued forward] ' + connection.transaction.uuid,
+                                            short_message: '[Queued forward] ' + queueId,
                                             _user: userData._id.toString(),
                                             _to: recipient,
                                             _mail_action: 'forward',
@@ -1307,7 +1308,7 @@ exports.hook_queue = function(next, connection) {
                                             short_message: '[QUEUED] ' + entry['forward-queue-id'],
                                             _queue_id: entry['forward-queue-id'],
 
-                                            _parent_queue_id: connection.transaction.uuid,
+                                            _parent_queue_id: queueId,
                                             _from: recipient,
                                             _to: entry.forward,
 
@@ -1321,7 +1322,7 @@ exports.hook_queue = function(next, connection) {
 
                                     if (entry.autoreply) {
                                         sendLogEntry({
-                                            short_message: '[Queued autoreply] ' + connection.transaction.uuid,
+                                            short_message: '[Queued autoreply] ' + queueId,
                                             _mail_action: 'autoreply',
                                             _user: userData._id.toString(),
                                             _to: recipient,
@@ -1333,7 +1334,7 @@ exports.hook_queue = function(next, connection) {
                                             short_message: '[QUEUED] ' + entry['autoreply-queue-id'],
                                             _queue_id: entry['autoreply-queue-id'],
 
-                                            _parent_queue_id: connection.transaction.uuid,
+                                            _parent_queue_id: queueId,
                                             _from: recipient,
                                             _to: entry.autoreply,
 
