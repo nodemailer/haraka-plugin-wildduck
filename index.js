@@ -1630,7 +1630,18 @@ exports.checkRspamdBlacklist = function(tnx) {
     }
 
     for (let key of plugin.rspamd.blacklist) {
-        if (typeof symbols[key] === 'number' && symbols[key] > 0) {
+        if (!(key in symbols)) {
+            continue;
+        }
+
+        let score;
+        if (typeof symbols[key] === 'number') {
+            score = symbols[key];
+        } else if (typeof symbols[key] === 'object' && symbols[key] && typeof symbols[key].score === 'number') {
+            score = symbols[key].score;
+        }
+
+        if (score && score > 0) {
             return { key, value: symbols[key] };
         }
     }
