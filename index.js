@@ -671,7 +671,7 @@ exports.real_rcpt_handler = function(next, connection, params) {
                     _rate_limit: 'yes',
                     _selector: selector,
                     _user: userData._id.toString(),
-                    _default_address: rcpt.address() !== userData._address ? userData._address : '',
+                    _default_address: rcpt.address() !== userData.address ? userData.address : '',
 
                     _error: 'rate limit check failed',
                     _failure: 'yes',
@@ -687,7 +687,7 @@ exports.real_rcpt_handler = function(next, connection, params) {
                     _selector: selector,
                     _error: 'too many attempts',
                     _user: userData._id.toString(),
-                    _default_address: rcpt.address() !== userData._address ? userData._address : ''
+                    _default_address: rcpt.address() !== userData.address ? userData.address : ''
                 };
                 tnx.notes.rejectCode = 'RATE_LIMIT';
                 return hookDone(DENYSOFT, DSN.rcpt_too_fast());
@@ -803,7 +803,7 @@ exports.real_rcpt_handler = function(next, connection, params) {
                             _user: userData._id.toString(),
                             _error: 'user over quota',
                             _over_quota: 'yes',
-                            _default_address: rcpt.address() !== userData._address ? userData._address : ''
+                            _default_address: rcpt.address() !== userData.address ? userData.address : ''
                         };
                         tnx.notes.rejectCode = 'MBOX_FULL';
                         return hookDone(DENY, DSN.mbox_full());
@@ -819,7 +819,7 @@ exports.real_rcpt_handler = function(next, connection, params) {
                                     _rate_limit: 'yes',
                                     _selector: selector,
                                     _user: userData._id.toString(),
-                                    _default_address: rcpt.address() !== userData._address ? userData._address : '',
+                                    _default_address: rcpt.address() !== userData.address ? userData.address : '',
 
                                     _error: 'rate limit check failed',
                                     _failure: 'yes',
@@ -835,7 +835,7 @@ exports.real_rcpt_handler = function(next, connection, params) {
                                     _selector: selector,
                                     _error: 'too many attempts',
                                     _user: userData._id.toString(),
-                                    _default_address: rcpt.address() !== userData._address ? userData._address : ''
+                                    _default_address: rcpt.address() !== userData.address ? userData.address : ''
                                 };
                                 tnx.notes.rejectCode = 'RATE_LIMIT';
                                 return hookDone(DENYSOFT, DSN.rcpt_too_fast());
@@ -854,7 +854,7 @@ exports.real_rcpt_handler = function(next, connection, params) {
                             resolution = {
                                 _user: userData._id.toString(),
                                 _rcpt_accepted: 'yes',
-                                _default_address: rcpt.address() !== userData._address ? userData._address : ''
+                                _default_address: rcpt.address() !== userData.address ? userData.address : ''
                             };
                             return hookDone(OK);
                         });
