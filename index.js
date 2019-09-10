@@ -188,6 +188,11 @@ exports.hook_deny = function(next, connection, params) {
     const tnx = connection.transaction;
     let remoteIp = connection.remote_ip;
 
+    if (tnx === null) {
+        next();
+        return;
+    }
+
     let rcpts = tnx.rcpt_to || [];
     if (!rcpts.length) {
         rcpts = [false];
