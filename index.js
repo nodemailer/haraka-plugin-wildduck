@@ -558,12 +558,12 @@ exports.real_rcpt_handler = function(next, connection, params) {
 
                     if (targetData.type === 'relay') {
                         // relay is not rate limited
-                        targetData.recipient = rcpt.address();
+                        targetData.recipient = targetData.address || rcpt.address();
 
                         // Do not use `targetData.value` alone as it might be the same for multiple recipients
-                        forwards.set(`${rcpt.address()}:${targetData.value}`, targetData);
+                        forwards.set(`${targetData.recipient}:${targetData.value}`, targetData);
 
-                        forwardTargets.push(rcpt.address() + ':' + (targetData.value || '').toString().replace(/\?.*$/, ''));
+                        forwardTargets.push(targetData.recipient + ':' + (targetData.value || '').toString().replace(/\?.*$/, ''));
                         return setImmediate(processTarget);
                     }
 
