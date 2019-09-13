@@ -558,7 +558,7 @@ exports.real_rcpt_handler = function(next, connection, params) {
 
                     if (targetData.type === 'relay') {
                         // relay is not rate limited
-                        targetData.recipient = targetData.address || rcpt.address();
+                        targetData.recipient = addressData.address || rcpt.address();
 
                         // Do not use `targetData.value` alone as it might be the same for multiple recipients
                         forwards.set(`${targetData.recipient}:${targetData.value}`, targetData);
