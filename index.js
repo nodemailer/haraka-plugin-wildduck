@@ -76,7 +76,9 @@ exports.open_database = function(server, next) {
             ? new Gelf(plugin.cfg.gelf.options)
             : {
                   // placeholder
-                  emit: () => false
+                  emit: (level, message) => {
+                      plugin.loginfo('GELF ' + JSON.stringify(message), plugin);
+                  }
               };
     wdErrors.setGelf(plugin.gelf);
 
