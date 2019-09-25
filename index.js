@@ -973,9 +973,9 @@ exports.hook_queue = function(next, connection) {
                 }
             });
 
-            this.rspamdSymbols(tnx).forEach(symbol => {
-                message['_rs_' + symbol.key.toLowerCase()] = symbol.score;
-            });
+            message._spam_tests = this.rspamdSymbols(tnx)
+                .map(symbol => `${symbol.key}=${symbol.score}`)
+                .join(', ');
 
             plugin.loggelf(message);
         }
@@ -1051,9 +1051,9 @@ exports.hook_queue = function(next, connection) {
                     _spam_allowed: plugin.rspamd.forwardSkip
                 };
 
-                this.rspamdSymbols(tnx).forEach(symbol => {
-                    message['_rs_' + symbol.key.toLowerCase()] = symbol.score;
-                });
+                message._spam_tests = this.rspamdSymbols(tnx)
+                    .map(symbol => `${symbol.key}=${symbol.score}`)
+                    .join(', ');
 
                 sendLogEntry(message);
 
@@ -1656,11 +1656,11 @@ exports.rspamdSymbols = function(tnx) {
             score = symbols[key];
         } else if (typeof symbols[key] === 'object' && symbols[key] && typeof symbols[key].score === 'number') {
             score = symbols[key].score;
+        } else {
+            return;
         }
 
-        if (score && score > 0) {
-            result.push({ key, value: symbols[key], score });
-        }
+        result.push({ key, value: symbols[key], score });
     });
 
     return result;
