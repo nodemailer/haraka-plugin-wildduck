@@ -1659,8 +1659,10 @@ exports.rspamdSymbols = function(tnx) {
         } else {
             return;
         }
-
-        result.push({ key, value: symbols[key], score });
+        if (score) {
+            // filter out SYMBOL=0 keys
+            result.push({ key, value: symbols[key], score });
+        }
     });
 
     return result;
