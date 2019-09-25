@@ -971,6 +971,10 @@ exports.hook_queue = function(next, connection) {
                 }
             });
 
+            this.rspamdSymbols(tnx).forEach(symbol => {
+                message['rs_' + symbol.key] = symbol.value;
+            });
+
             plugin.loggelf(message);
         }
     };
@@ -1036,14 +1040,20 @@ exports.hook_queue = function(next, connection) {
                 // do not forward spam messages
                 plugin.loginfo('FORWARDSKIP score=' + JSON.stringify(rspamd.score) + ' required=' + plugin.rspamd.forwardSkip, plugin, connection);
 
-                sendLogEntry({
+                let message = {
                     short_message: '[Skip forward] ' + queueId,
                     _mail_action: 'forward',
                     _forward_skipped: 'yes',
-                    _spam_score: rspamd.score,
+                    _spam_score: rspamd ? rspamd.score : '',
                     _spam_action: rspamd ? rspamd.action : '',
                     _spam_allowed: plugin.rspamd.forwardSkip
+                };
+
+                this.rspamdSymbols(tnx).forEach(symbol => {
+                    message['rs_' + symbol.key] = symbol.value;
                 });
+
+                sendLogEntry(message);
 
                 return collectData(done);
             }
@@ -1625,6 +1635,31 @@ exports.getHeaderAddresses = function(tnx, next) {
                 cc: ccAddresses
             });
         });
+};
+
+exports.rspamdSymbols = function(tnx) {
+    let rspamd = tnx.results.get('rspamd');
+    let symbols = (rspamd && rspamd.symbols) || rspamd;
+
+    let result = [];
+
+    if (!symbols) {
+        return result;
+    }
+
+    Object.keys(symbols).forEach(key => {
+        let score;
+        if (typeof symbols[key] === 'number') {
+            score = symbols[key];
+        } else if (typeof symbols[key] === 'object' && symbols[key] && typeof symbols[key].score === 'number') {
+            score = symbols[key].score;
+        }
+        if (score && score > 0) {
+            result.push({ key, value: symbols[key] });
+        }
+    });
+
+    return result;
 };
 
 exports.checkRspamdBlacklist = function(tnx) {
