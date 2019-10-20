@@ -608,8 +608,7 @@ exports.real_rcpt_handler = function(next, connection, params) {
                                 pubKey: true,
                                 spamLevel: true,
                                 storageUsed: true,
-                                quota: true,
-                                audit: true
+                                quota: true
                             }
                         },
                         (err, userData) => {
