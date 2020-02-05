@@ -68,6 +68,7 @@ exports.open_database = function(server, next) {
     plugin.rspamd = plugin.cfg.rspamd || {};
     plugin.rspamd.forwardSkip = Number(plugin.rspamd.forwardSkip) || Number(plugin.cfg.spamScoreForwarding) || 0;
     plugin.rspamd.blacklist = [].concat(plugin.rspamd.blacklist || []);
+    plugin.rspamd.softlist = [].concat(plugin.rspamd.softlist || []);
     plugin.rspamd.responses = plugin.rspamd.responses || {};
 
     plugin.hostname = (plugin.cfg.gelf && plugin.cfg.gelf.hostname) || os.hostname();
@@ -888,6 +889,13 @@ exports.hook_queue = function(next, connection) {
         return next(DENY, plugin.dsnSpamResponse(tnx, blacklisted.key).reply);
     }
 
+    let softlisted = this.checkRspamdSoftlist(tnx);
+    if (softlisted) {
+        // can not send DSN object for hook_queue as it is converted to [object Object]
+        tnx.notes.rejectCode = softlisted.key;
+        return next(DENYSOFT, plugin.dsnSpamResponse(tnx, softlisted.key).reply);
+    }
+
     // results about verification (TLS, SPF, DKIM)
     let verificationResults = {
         tls: false,
@@ -1677,6 +1685,34 @@ exports.checkRspamdBlacklist = function(tnx) {
     }
 
     for (let key of plugin.rspamd.blacklist) {
+        if (!(key in symbols)) {
+            continue;
+        }
+
+        let score;
+        if (typeof symbols[key] === 'number') {
+            score = symbols[key];
+        } else if (typeof symbols[key] === 'object' && symbols[key] && typeof symbols[key].score === 'number') {
+            score = symbols[key].score;
+        }
+
+        if (score && score > 0) {
+            return { key, value: symbols[key] };
+        }
+    }
+    return false;
+};
+
+exports.checkRspamdSoftlist = function(tnx) {
+    const plugin = this;
+    let rspamd = tnx.results.get('rspamd');
+    let symbols = (rspamd && rspamd.symbols) || rspamd;
+
+    if (!symbols) {
+        return false;
+    }
+
+    for (let key of plugin.rspamd.softlist) {
         if (!(key in symbols)) {
             continue;
         }

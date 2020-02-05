@@ -81,6 +81,11 @@ rspamd:
     blacklist:
         - DMARC_POLICY_REJECT
 
+    # if a message has one of the tags listed here with positive score, the message will be soft rejected
+    softlist:
+        - RBL_ZONE
+
     # define special responses
     responses:
-        DMARC_POLICY_REJECT: "Unauthenticated email from {host} is not accepted due to domain's DMARC policy"
+        DMARC_POLICY_REJECT: 'Unauthenticated email from {host} is not accepted due to domain's DMARC policy'
+        RBL_ZONE: '[{host}] was found from Zone RBL'
