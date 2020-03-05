@@ -36,11 +36,11 @@
     "dependencies": {
         "gelf": "2.0.1",
         "haraka-dsn": "1.0.3",
-        "ioredis": "4.14.1",
+        "ioredis": "4.16.0",
         "libmime": "4.2.1",
-        "mongodb": "3.5.2",
-        "nodemailer": "6.4.2",
+        "mongodb": "3.5.4",
+        "nodemailer": "6.4.4",
         "srs.js": "0.1.0",
-        "wildduck": "1.23.2"
+        "wildduck": "1.23.3"
     }
 }

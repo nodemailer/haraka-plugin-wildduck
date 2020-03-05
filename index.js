@@ -91,7 +91,7 @@ exports.open_database = function(server, next) {
         }
         message = message || {};
 
-        const component = plugin.cfg.gelf.component || 'mx';
+        const component = (plugin.cfg.gelf && plugin.cfg.gelf.component) || 'mx';
         if (!message.short_message || message.short_message.indexOf(component.toUpperCase()) !== 0) {
             message.short_message = component.toUpperCase() + ' ' + (message.short_message || '');
         }
