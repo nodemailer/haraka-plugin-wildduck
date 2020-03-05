@@ -87,5 +87,5 @@ rspamd:
 
     # define special responses
     responses:
-        DMARC_POLICY_REJECT: 'Unauthenticated email from {host} is not accepted due to domain's DMARC policy'
+        DMARC_POLICY_REJECT: 'Unauthenticated email from {host} is not accepted due to domain''s DMARC policy'
         RBL_ZONE: '[{host}] was found from Zone RBL'
