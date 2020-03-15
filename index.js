@@ -967,6 +967,7 @@ exports.hook_queue = function(next, connection) {
                 short_message: '[PROCESS] ' + queueId,
                 _mail_action: 'process',
                 _queue_id: queueId,
+                _ip: remoteIp,
                 _message_id: messageId.replace(/^[\s<]+|[\s>]+$/g, ''),
                 _spam_score: rspamd ? rspamd.score : '',
                 _spam_action: rspamd ? rspamd.action : '',
@@ -1387,7 +1388,7 @@ exports.hook_queue = function(next, connection) {
                                     }
 
                                     if (entry.mailbox && entry.id) {
-                                        targetMailbox = entry.mailbox;
+                                        targetMailbox = entry.mailbox && { mailbox: entry.mailbox, path: entry.path, uid: entry.uid };
                                         targetId = entry.id;
                                         return;
                                     }
@@ -1472,7 +1473,11 @@ exports.hook_queue = function(next, connection) {
                                 _filter: filterMessages.length ? filterMessages.join('\n') : '',
                                 _filter_is_spam: isSpam ? 'yes' : 'no',
                                 _filters_matching: matchingFilters ? matchingFilters.join('\n') : '',
-                                _stored_mailbox: targetMailbox,
+
+                                _stored_mailbox: targetMailbox && targetMailbox.mailbox,
+                                _stored_path: targetMailbox && targetMailbox.path,
+                                _stored_uid: targetMailbox && targetMailbox.uid,
+
                                 _stored_id: targetId
                             });
 
