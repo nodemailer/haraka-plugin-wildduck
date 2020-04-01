@@ -11,7 +11,7 @@ echo "wildduck" >> config/plugins
 service haraka restart
 ```
 
-Additionally you should enable `queue/lmtp` plugin as the Wild Duck plugin only checks recipient info but does not do the actual delivery.
+WildDuck plugin should be placed last in the plugins file.
 
 ### Configuration
 
@@ -24,6 +24,6 @@ $EDITOR config/wildduck.ini
 
 ### Notes
 
-Minimally you would need this plugin and [queue/lmtp](http://haraka.github.io/manual/plugins/queue/lmtp.html) plugin to use Haraka with Wild Duck.
+This is the only delivery plugin you need to use Haraka with Wild Duck. Make sure Haraka has no other delivery plugin enabled.
 
-If you use a antispam plugin as well, then messages with headers "X-RSpamd-Spam: Yes" or "X-Spam-Status: Yes" are delivered to the Junk folder automatically. Which header is preferred can be set in Wild Duck config file (by default X-RSpamd-Spamd is used).
+For antispam WildDuck supports Haraka Rspamd plugin. WildDuck uses Rspamd output to route messages marked as spam to the Junk mailbox.
