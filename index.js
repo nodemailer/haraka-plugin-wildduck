@@ -527,6 +527,17 @@ exports.real_rcpt_handler = function(next, connection, params) {
                     return hookDone(DENYSOFT, DSN.rcpt_too_fast());
                 }
 
+                if (addressData.forwardedDisabled) {
+                    // forwarded address is disabled for whatever reason
+                    resolution = {
+                        _address: addressData._id.toString(),
+                        _error: 'disabled forwarded address',
+                        _disabled_forwarded: 'yes'
+                    };
+                    tnx.notes.rejectCode = 'MBOX_DISABLED';
+                    return hookDone(DENY, DSN.mbox_disabled());
+                }
+
                 plugin.loginfo(
                     'FORWARDING rcpt=' +
                         address +
@@ -719,7 +730,8 @@ exports.real_rcpt_handler = function(next, connection, params) {
                 addrview: true,
                 forwards: true,
                 autoreply: true,
-                targets: true // only forwarded address has `targets` set
+                targets: true, // only forwarded address has `targets` set
+                forwardedDisabled: true // only forwarded address has `targets` set
             }
         },
         (err, addressData) => {
