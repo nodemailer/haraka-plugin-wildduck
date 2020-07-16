@@ -47,6 +47,11 @@ sender:
     # by default the main wildduck database is used
     collection: 'zone-queue'
 
+    # Hashing secret for loop detection
+    # Must be shared with wildduck
+    # If not set then looping is not tracked
+    loopSecret: ''
+
 srs:
     # must be shared with ZoneMTA SRS config, otherwise messages sent from ZoneMTA are not recognized by Haraka
     secret: 'secret value'
@@ -87,5 +92,5 @@ rspamd:
 
     # define special responses
     responses:
-        DMARC_POLICY_REJECT: 'Unauthenticated email from {host} is not accepted due to domain''s DMARC policy'
+        DMARC_POLICY_REJECT: "Unauthenticated email from {host} is not accepted due to domain's DMARC policy"
         RBL_ZONE: '[{host}] was found from Zone RBL'

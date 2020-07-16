@@ -35,7 +35,7 @@ DSN.rcpt_too_fast = () =>
 let defaultSpamRejectMessage =
     'Our system has detected that this message is likely unsolicited mail.\nTo reduce the amount of spam this message has been blocked.';
 
-exports.register = function() {
+exports.register = function () {
     const plugin = this;
     plugin.logdebug('Initializing rcpt_to Wild Duck plugin.', plugin);
     plugin.load_wildduck_ini();
@@ -44,7 +44,7 @@ exports.register = function() {
     plugin.register_hook('init_child', 'init_wildduck_shared');
 };
 
-exports.load_wildduck_ini = function() {
+exports.load_wildduck_ini = function () {
     const plugin = this;
 
     plugin.cfg = plugin.config.get(
@@ -58,7 +58,7 @@ exports.load_wildduck_ini = function() {
     );
 };
 
-exports.open_database = function(server, next) {
+exports.open_database = function (server, next) {
     const plugin = this;
 
     plugin.srsRewriter = new SRS({
@@ -164,7 +164,7 @@ exports.open_database = function(server, next) {
     tryCreateConnection();
 };
 
-exports.normalize_address = function(address) {
+exports.normalize_address = function (address) {
     if (/^SRS\d+=/i.test(address.user)) {
         // Try to fix case-mangled addresses where the intermediate MTA converts user part to lower case
         // and thus breaks hash verification
@@ -180,13 +180,13 @@ exports.normalize_address = function(address) {
     return tools.normalizeAddress(address.address());
 };
 
-exports.init_wildduck_shared = function(next, server) {
+exports.init_wildduck_shared = function (next, server) {
     const plugin = this;
 
     plugin.open_database(server, next);
 };
 
-exports.hook_deny = function(next, connection, params) {
+exports.hook_deny = function (next, connection, params) {
     const plugin = this;
     const tnx = connection.transaction;
     let remoteIp = connection.remote_ip;
@@ -254,7 +254,7 @@ exports.hook_deny = function(next, connection, params) {
     next();
 };
 
-exports.hook_mail = function(next, connection, params) {
+exports.hook_mail = function (next, connection, params) {
     const plugin = this;
     const tnx = connection.transaction;
 
@@ -289,7 +289,7 @@ exports.hook_mail = function(next, connection, params) {
     return next();
 };
 
-exports.hook_rcpt = function(next, connection, params) {
+exports.hook_rcpt = function (next, connection, params) {
     const plugin = this;
     const tnx = connection.transaction;
 
@@ -352,7 +352,7 @@ exports.hook_rcpt = function(next, connection, params) {
     runCheck();
 };
 
-exports.real_rcpt_handler = function(next, connection, params) {
+exports.real_rcpt_handler = function (next, connection, params) {
     const plugin = this;
     const tnx = connection.transaction;
     const remoteIp = connection.remote_ip;
@@ -400,12 +400,7 @@ exports.real_rcpt_handler = function(next, connection, params) {
         let reversed = false;
         try {
             reversed = plugin.srsRewriter.reverse(address.substr(0, address.indexOf('@')));
-            let toDomain = punycode.toASCII(
-                (reversed[1] || '')
-                    .toString()
-                    .toLowerCase()
-                    .trim()
-            );
+            let toDomain = punycode.toASCII((reversed[1] || '').toString().toLowerCase().trim());
 
             if (!toDomain) {
                 plugin.logerror('SRS FAILED rcpt=' + address + ' error=Missing domain', plugin, connection);
@@ -886,7 +881,7 @@ exports.real_rcpt_handler = function(next, connection, params) {
     );
 };
 
-exports.hook_queue = function(next, connection) {
+exports.hook_queue = function (next, connection) {
     const plugin = this;
     const tnx = connection.transaction;
     const queueId = tnx.uuid;
@@ -1510,7 +1505,7 @@ exports.hook_queue = function(next, connection) {
 };
 
 // Rate limit is checked on RCPT TO
-exports.checkRateLimit = function(connection, selector, key, limit, next) {
+exports.checkRateLimit = function (connection, selector, key, limit, next) {
     const plugin = this;
 
     limit = Number(limit) || plugin.cfg.limits[selector];
@@ -1539,7 +1534,7 @@ exports.checkRateLimit = function(connection, selector, key, limit, next) {
 };
 
 // Update rate limit counters on successful delivery
-exports.updateRateLimit = function(connection, selector, key, limit, next) {
+exports.updateRateLimit = function (connection, selector, key, limit, next) {
     const plugin = this;
 
     limit = Number(limit) || plugin.cfg.limits[selector];
@@ -1565,7 +1560,7 @@ exports.updateRateLimit = function(connection, selector, key, limit, next) {
     });
 };
 
-exports.getHeaderFrom = function(tnx) {
+exports.getHeaderFrom = function (tnx) {
     let fromAddresses = new Map();
     [].concat(tnx.header.get_all('From') || []).forEach(entry => {
         let walk = addresses => {
@@ -1594,7 +1589,7 @@ exports.getHeaderFrom = function(tnx) {
         .shift();
 };
 
-exports.getHeaderAddresses = function(tnx, next) {
+exports.getHeaderAddresses = function (tnx, next) {
     const plugin = this;
 
     let toAddresses = new Map();
@@ -1663,7 +1658,7 @@ exports.getHeaderAddresses = function(tnx, next) {
         });
 };
 
-exports.rspamdSymbols = function(tnx) {
+exports.rspamdSymbols = function (tnx) {
     let rspamd = tnx.results.get('rspamd');
     let symbols = (rspamd && rspamd.symbols) || rspamd;
 
@@ -1692,7 +1687,7 @@ exports.rspamdSymbols = function(tnx) {
     return result;
 };
 
-exports.checkRspamdBlacklist = function(tnx) {
+exports.checkRspamdBlacklist = function (tnx) {
     const plugin = this;
     let rspamd = tnx.results.get('rspamd');
     let symbols = (rspamd && rspamd.symbols) || rspamd;
@@ -1720,7 +1715,7 @@ exports.checkRspamdBlacklist = function(tnx) {
     return false;
 };
 
-exports.checkRspamdSoftlist = function(tnx) {
+exports.checkRspamdSoftlist = function (tnx) {
     const plugin = this;
     let rspamd = tnx.results.get('rspamd');
     let symbols = (rspamd && rspamd.symbols) || rspamd;
@@ -1748,7 +1743,7 @@ exports.checkRspamdSoftlist = function(tnx) {
     return false;
 };
 
-exports.dsnSpamResponse = function(tnx, key) {
+exports.dsnSpamResponse = function (tnx, key) {
     const plugin = this;
     let message = plugin.rspamd.responses[key] || defaultSpamRejectMessage;
 
