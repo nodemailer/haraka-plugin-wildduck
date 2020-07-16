@@ -50,7 +50,7 @@ sender:
     # Hashing secret for loop detection
     # Must be shared with wildduck
     # If not set then looping is not tracked
-    loopSecret: ''
+    #loopSecret: 'secret value'
 
 srs:
     # must be shared with ZoneMTA SRS config, otherwise messages sent from ZoneMTA are not recognized by Haraka
