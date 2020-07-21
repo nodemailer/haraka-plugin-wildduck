@@ -886,6 +886,7 @@ exports.hook_queue = function (next, connection) {
     const tnx = connection.transaction;
     const queueId = tnx.uuid;
     const remoteIp = connection.remote_ip;
+    const { forwards, autoreplies, users } = tnx.notes.targets;
 
     const transhost = connection.hello.host;
 
@@ -956,7 +957,6 @@ exports.hook_queue = function (next, connection) {
         }
     }
 
-    const { forwards, autoreplies, users } = tnx.notes.targets;
     let messageId = (tnx.header.get('Message-Id') || '').toString();
     let subject = (tnx.header.get('Subject') || '').toString();
 
@@ -1019,438 +1019,396 @@ exports.hook_queue = function (next, connection) {
         tnx.message_stream.pipe(collector);
     };
 
-    plugin.getHeaderAddresses(tnx, (err, headerAddresses) => {
-        if (err) {
-            sendLogEntry({
-                full_message: err.stack,
+    const referencedUsers = plugin.getReferencedUsers(tnx);
 
-                _error: 'error resolving addresses',
-                _failure: 'yes',
-                _err_code: err.code
-            });
-            tnx.notes.rejectCode = 'ERRQ02';
-            return next(DENYSOFT, 'Failed to queue message [ERRQ02]');
+    // filter user ids that are allowed to send autoreplies
+    // this way we skip sending autoreplies from forwarded addresses
+    let allowAutoreply = new Set();
+    referencedUsers.forEach(user => {
+        allowAutoreply.add(user.userData._id.toString());
+    });
+
+    let forwardMessage = done => {
+        if (!forwards.size) {
+            // the message does not need forwarding at this point
+            return collectData(done);
         }
 
-        // filter user ids that are allowed to send autoreplies
-        // this way we skip sending autoreplies from forwarded addresses
-        let allowAutoreply = new Set();
-        headerAddresses.to.forEach(addr => {
-            if (addr.user) {
-                allowAutoreply.add(addr.user.toString());
-            }
-        });
-        headerAddresses.cc.forEach(addr => {
-            if (addr.user) {
-                allowAutoreply.add(addr.user.toString());
-            }
-        });
+        let rspamd = tnx.results.get('rspamd');
+        if (rspamd && rspamd.score && plugin.rspamd.forwardSkip && rspamd.score >= plugin.rspamd.forwardSkip) {
+            // do not forward spam messages
+            plugin.loginfo('FORWARDSKIP score=' + JSON.stringify(rspamd.score) + ' required=' + plugin.rspamd.forwardSkip, plugin, connection);
 
-        let forwardMessage = done => {
-            if (!forwards.size) {
-                // the message does not need forwarding at this point
-                return collectData(done);
-            }
-
-            let rspamd = tnx.results.get('rspamd');
-            if (rspamd && rspamd.score && plugin.rspamd.forwardSkip && rspamd.score >= plugin.rspamd.forwardSkip) {
-                // do not forward spam messages
-                plugin.loginfo('FORWARDSKIP score=' + JSON.stringify(rspamd.score) + ' required=' + plugin.rspamd.forwardSkip, plugin, connection);
-
-                let message = {
-                    short_message: '[Skip forward] ' + queueId,
-                    _mail_action: 'forward',
-                    _forward_skipped: 'yes',
-                    _spam_score: rspamd ? rspamd.score : '',
-                    _spam_action: rspamd ? rspamd.action : '',
-                    _spam_allowed: plugin.rspamd.forwardSkip
-                };
-
-                message._spam_tests = this.rspamdSymbols(tnx)
-                    .map(symbol => `${symbol.key}=${symbol.score}`)
-                    .join(', ');
-
-                sendLogEntry(message);
-
-                return collectData(done);
-            }
-
-            let targets =
-                (forwards.size &&
-                    Array.from(forwards).map(row => ({
-                        type: row[1].type,
-                        value: row[1].value,
-                        recipient: row[1].recipient
-                    }))) ||
-                false;
-
-            let mail = {
-                parentId: tnx.notes.id,
-                reason: 'forward',
-
-                from: tnx.notes.sender,
-                to: [],
-
-                targets,
-
-                interface: 'forwarder'
+            let message = {
+                short_message: '[Skip forward] ' + queueId,
+                _mail_action: 'forward',
+                _forward_skipped: 'yes',
+                _spam_score: rspamd ? rspamd.score : '',
+                _spam_action: rspamd ? rspamd.action : '',
+                _spam_allowed: plugin.rspamd.forwardSkip
             };
 
-            let message = plugin.maildrop.push(mail, (err, ...args) => {
-                if (err || !args[0]) {
-                    if (err) {
-                        err.code = err.code || 'ERRCOMPOSE';
-                        sendLogEntry({
-                            full_message: err.stack,
+            message._spam_tests = this.rspamdSymbols(tnx)
+                .map(symbol => `${symbol.key}=${symbol.score}`)
+                .join(', ');
 
-                            _error: 'failed to store message',
-                            _failure: 'yes',
-                            _err_code: err.code
-                        });
-                        tnx.notes.rejectCode = 'ERRQ03';
-                        return next(DENYSOFT, 'Failed to queue message [ERRQ03]');
-                    }
-                    return done(err, ...args);
-                }
+            sendLogEntry(message);
 
-                sendLogEntry({
-                    short_message: '[Queued forward] ' + queueId,
-                    _mail_action: 'forward',
-                    _target_queue_id: args[0].id,
-                    _target_address: (targets || []).map(target => ((target && target.value) || target).toString().replace(/\?.*$/, '')).join('\n')
-                });
+            return collectData(done);
+        }
 
-                plugin.loggelf({
-                    _queue_id: args[0].id,
+        let targets =
+            (forwards.size &&
+                Array.from(forwards).map(row => ({
+                    type: row[1].type,
+                    value: row[1].value,
+                    recipient: row[1].recipient
+                }))) ||
+            false;
 
-                    short_message: '[QUEUED] ' + args[0].id,
+        let mail = {
+            parentId: tnx.notes.id,
+            reason: 'forward',
 
-                    _parent_queue_id: queueId,
-                    _from: tnx.notes.sender,
-                    _to: (targets || []).map(target => ((target && target.value) || target).toString().replace(/\?.*$/, '')).join('\n'),
+            from: tnx.notes.sender,
+            to: [],
 
-                    _queued: 'yes',
-                    _forwarded: 'yes',
+            targets,
 
-                    _interface: 'mx'
-                });
+            interface: 'forwarder'
+        };
 
-                plugin.loginfo('QUEUED FORWARD queue-id=' + args[0].id, plugin, connection);
-
-                done(err, args && args[0] && args[0].id);
-            });
-
-            if (message) {
-                tnx.message_stream.once('error', err => message.emit('error', err));
-                message.once('error', err => {
-                    plugin.logerror('QUEUEERROR Failed to retrieve message. error=' + err.message, plugin, connection);
+        let message = plugin.maildrop.push(mail, (err, ...args) => {
+            if (err || !args[0]) {
+                if (err) {
+                    err.code = err.code || 'ERRCOMPOSE';
                     sendLogEntry({
                         full_message: err.stack,
 
-                        _error: 'failed to retrieve message from input',
+                        _error: 'failed to store message',
                         _failure: 'yes',
                         _err_code: err.code
                     });
-                    tnx.notes.rejectCode = 'ERRQ04';
-                    return next(DENYSOFT, 'Failed to queue message [ERRQ04]');
-                });
-
-                // pipe the message to the collector object to gather message chunks for further processing
-                tnx.message_stream.pipe(collector).pipe(message);
+                    tnx.notes.rejectCode = 'ERRQ03';
+                    return next(DENYSOFT, 'Failed to queue message [ERRQ03]');
+                }
+                return done(err, ...args);
             }
-        };
 
-        let sendAutoreplies = done => {
-            if (!autoreplies.size) {
+            sendLogEntry({
+                short_message: '[Queued forward] ' + queueId,
+                _mail_action: 'forward',
+                _target_queue_id: args[0].id,
+                _target_address: (targets || []).map(target => ((target && target.value) || target).toString().replace(/\?.*$/, '')).join('\n')
+            });
+
+            plugin.loggelf({
+                _queue_id: args[0].id,
+
+                short_message: '[QUEUED] ' + args[0].id,
+
+                _parent_queue_id: queueId,
+                _from: tnx.notes.sender,
+                _to: (targets || []).map(target => ((target && target.value) || target).toString().replace(/\?.*$/, '')).join('\n'),
+
+                _queued: 'yes',
+                _forwarded: 'yes',
+
+                _interface: 'mx'
+            });
+
+            plugin.loginfo('QUEUED FORWARD queue-id=' + args[0].id, plugin, connection);
+
+            done(err, args && args[0] && args[0].id);
+        });
+
+        if (message) {
+            tnx.message_stream.once('error', err => message.emit('error', err));
+            message.once('error', err => {
+                plugin.logerror('QUEUEERROR Failed to retrieve message. error=' + err.message, plugin, connection);
+                sendLogEntry({
+                    full_message: err.stack,
+
+                    _error: 'failed to retrieve message from input',
+                    _failure: 'yes',
+                    _err_code: err.code
+                });
+                tnx.notes.rejectCode = 'ERRQ04';
+                return next(DENYSOFT, 'Failed to queue message [ERRQ04]');
+            });
+
+            // pipe the message to the collector object to gather message chunks for further processing
+            tnx.message_stream.pipe(collector).pipe(message);
+        }
+    };
+
+    let sendAutoreplies = done => {
+        if (!autoreplies.size) {
+            return done();
+        }
+
+        let curtime = new Date();
+        let pos = 0;
+        let targets = Array.from(autoreplies);
+        let processNext = () => {
+            if (pos >= targets.length) {
                 return done();
             }
 
-            let curtime = new Date();
-            let pos = 0;
-            let targets = Array.from(autoreplies);
-            let processNext = () => {
-                if (pos >= targets.length) {
-                    return done();
-                }
+            let target = targets[pos++];
+            let addressData = target[1];
 
-                let target = targets[pos++];
-                let addressData = target[1];
+            let autoreplyData = addressData.autoreply;
+            autoreplyData._id = autoreplyData._id || addressData._id;
 
-                let autoreplyData = addressData.autoreply;
-                autoreplyData._id = autoreplyData._id || addressData._id;
+            if (!autoreplyData || !autoreplyData.status) {
+                return setImmediate(processNext);
+            }
 
-                if (!autoreplyData || !autoreplyData.status) {
-                    return setImmediate(processNext);
-                }
+            if (autoreplyData.start && autoreplyData.start > curtime) {
+                return setImmediate(processNext);
+            }
 
-                if (autoreplyData.start && autoreplyData.start > curtime) {
-                    return setImmediate(processNext);
-                }
+            if (autoreplyData.end && autoreplyData.end < curtime) {
+                return setImmediate(processNext);
+            }
 
-                if (autoreplyData.end && autoreplyData.end < curtime) {
-                    return setImmediate(processNext);
-                }
-
-                autoreply(
-                    {
-                        db: plugin.db,
-                        queueId,
-                        maildrop: plugin.maildrop,
-                        sender: tnx.notes.sender,
-                        recipient: addressData.address,
-                        chunks: collector.chunks,
-                        chunklen: collector.chunklen,
-                        messageHandler: plugin.db.messageHandler
-                    },
-                    autoreplyData,
-                    (err, ...args) => {
-                        if (err || !args[0]) {
-                            if (err) {
-                                // don't really care
-                                plugin.lognotice('AUTOREPLY ERROR target=' + tnx.notes.sender + ' error=' + err.message, plugin, connection);
-                                return processNext();
-                            }
-                            return done(err, ...args);
+            autoreply(
+                {
+                    db: plugin.db,
+                    queueId,
+                    maildrop: plugin.maildrop,
+                    sender: tnx.notes.sender,
+                    recipient: addressData.address,
+                    chunks: collector.chunks,
+                    chunklen: collector.chunklen,
+                    messageHandler: plugin.db.messageHandler
+                },
+                autoreplyData,
+                (err, ...args) => {
+                    if (err || !args[0]) {
+                        if (err) {
+                            // don't really care
+                            plugin.lognotice('AUTOREPLY ERROR target=' + tnx.notes.sender + ' error=' + err.message, plugin, connection);
+                            return processNext();
                         }
-
-                        sendLogEntry({
-                            short_message: '[Queued autoreply] ' + queueId,
-                            _mail_action: 'autoreply',
-                            _target_queue_id: args[0].id,
-                            _target_address: addressData.address
-                        });
-
-                        plugin.loggelf({
-                            _queue_id: args[0].id,
-
-                            short_message: '[QUEUED] ' + args[0].id,
-
-                            _parent_queue_id: queueId,
-                            _from: addressData.address,
-                            _to: addressData.address,
-
-                            _queued: 'yes',
-                            _autoreply: 'yes',
-
-                            _interface: 'mx'
-                        });
-
-                        plugin.loginfo('QUEUED AUTOREPLY target=' + tnx.notes.sender + ' queue-id=' + args[0].id, plugin, connection);
                         return done(err, ...args);
                     }
-                );
-            };
-            processNext();
-        };
 
-        // update rate limit counters for all recipients
-        let updateRateLimits = done => {
-            let rateKeys = tnx.notes.rateKeys || [];
-            let pos = 0;
-            let processKey = () => {
-                if (pos >= rateKeys.length) {
-                    plugin.logdebug('Rate keys processed', plugin, connection);
-                    return done();
+                    sendLogEntry({
+                        short_message: '[Queued autoreply] ' + queueId,
+                        _mail_action: 'autoreply',
+                        _target_queue_id: args[0].id,
+                        _target_address: addressData.address
+                    });
+
+                    plugin.loggelf({
+                        _queue_id: args[0].id,
+
+                        short_message: '[QUEUED] ' + args[0].id,
+
+                        _parent_queue_id: queueId,
+                        _from: addressData.address,
+                        _to: addressData.address,
+
+                        _queued: 'yes',
+                        _autoreply: 'yes',
+
+                        _interface: 'mx'
+                    });
+
+                    plugin.loginfo('QUEUED AUTOREPLY target=' + tnx.notes.sender + ' queue-id=' + args[0].id, plugin, connection);
+                    return done(err, ...args);
+                }
+            );
+        };
+        processNext();
+    };
+
+    // update rate limit counters for all recipients
+    let updateRateLimits = done => {
+        let rateKeys = tnx.notes.rateKeys || [];
+        let pos = 0;
+        let processKey = () => {
+            if (pos >= rateKeys.length) {
+                plugin.logdebug('Rate keys processed', plugin, connection);
+                return done();
+            }
+
+            let rateKey = rateKeys[pos++];
+            plugin.logdebug('Rate key. key=' + JSON.stringify(rateKey), plugin, connection);
+            plugin.updateRateLimit(connection, rateKey.selector || 'rcpt', rateKey.key, rateKey.limit, processKey);
+        };
+        processKey();
+    };
+
+    // try to forward the message. If forwarding is not needed then continues immediatelly
+    forwardMessage(() => {
+        // send autoreplies to forwarded addresses (if needed)
+        sendAutoreplies(() => {
+            let prepared = false;
+
+            let userList = Array.from(users).map(e => e[1]);
+            let stored = 0;
+
+            let storeNext = () => {
+                if (stored >= userList.length) {
+                    return updateRateLimits(() => next(OK, 'Message processed'));
                 }
 
-                let rateKey = rateKeys[pos++];
-                plugin.logdebug('Rate key. key=' + JSON.stringify(rateKey), plugin, connection);
-                plugin.updateRateLimit(connection, rateKey.selector || 'rcpt', rateKey.key, rateKey.limit, processKey);
-            };
-            processKey();
-        };
+                let rspamd = tnx.results.get('rspamd');
+                let rcptData = userList[stored++];
+                let recipient = rcptData.recipient;
+                let userData = rcptData.userData;
 
-        // try to forward the message. If forwarding is not needed then continues immediatelly
-        forwardMessage(() => {
-            // send autoreplies to forwarded addresses (if needed)
-            sendAutoreplies(() => {
-                let prepared = false;
+                plugin.logdebug(plugin, 'Filtering message for ' + recipient, plugin, connection);
+                plugin.filterHandler.process(
+                    {
+                        mimeTree: prepared && prepared.mimeTree,
+                        maildata: prepared && prepared.maildata,
+                        user: userData,
+                        sender: tnx.notes.sender,
+                        recipient,
+                        chunks: collector.chunks,
+                        chunklen: collector.chunklen,
+                        disableAutoreply: !allowAutoreply.has(userData._id.toString()),
+                        verificationResults,
+                        meta: {
+                            transactionId: queueId,
+                            source: 'MX',
+                            from: tnx.notes.sender,
+                            to: [recipient],
+                            origin: remoteIp,
+                            transhost,
+                            transtype: tnx.notes.transmissionType,
+                            spamScore: rspamd ? rspamd.score : false,
+                            spamAction: rspamd ? rspamd.action : false,
+                            time: new Date()
+                        }
+                    },
+                    (err, response, preparedResponse) => {
+                        if (!prepared && preparedResponse) {
+                            // reuse parsed message structure
+                            prepared = preparedResponse;
+                        }
 
-                let userList = Array.from(users).map(e => e[1]);
-                let stored = 0;
+                        if (err) {
+                            sendLogEntry({
+                                full_message: err.stack,
 
-                let storeNext = () => {
-                    if (stored >= userList.length) {
-                        return updateRateLimits(() => next(OK, 'Message processed'));
-                    }
+                                _user: userData._id.toString(),
+                                _address: recipient,
 
-                    let rspamd = tnx.results.get('rspamd');
-                    let rcptData = userList[stored++];
-                    let recipient = rcptData.recipient;
-                    let userData = rcptData.userData;
+                                _no_store: 'yes',
+                                _error: 'failed to store message',
+                                _failure: 'yes',
+                                _err_code: err.code
+                            });
 
-                    plugin.logdebug(plugin, 'Filtering message for ' + recipient, plugin, connection);
-                    plugin.filterHandler.process(
-                        {
-                            mimeTree: prepared && prepared.mimeTree,
-                            maildata: prepared && prepared.maildata,
-                            user: userData,
-                            sender: tnx.notes.sender,
-                            recipient,
-                            chunks: collector.chunks,
-                            chunklen: collector.chunklen,
-                            disableAutoreply: !allowAutoreply.has(userData._id.toString()),
-                            verificationResults,
-                            meta: {
-                                transactionId: queueId,
-                                source: 'MX',
-                                from: tnx.notes.sender,
-                                to: [recipient],
-                                origin: remoteIp,
-                                transhost,
-                                transtype: tnx.notes.transmissionType,
-                                spamScore: rspamd ? rspamd.score : false,
-                                spamAction: rspamd ? rspamd.action : false,
-                                time: new Date()
-                            }
-                        },
-                        (err, response, preparedResponse) => {
-                            if (!prepared && preparedResponse) {
-                                // reuse parsed message structure
-                                prepared = preparedResponse;
-                            }
+                            // might be an isse to reject if some recipients were already processed
+                            plugin.loginfo('DEFERRED rcpt=' + recipient + ' error=' + err.message, plugin, connection);
+                            tnx.notes.rejectCode = 'ERRQ05';
+                            return next(DENYSOFT, 'Failed to queue message [ERRQ05]');
+                        }
 
-                            if (err) {
-                                sendLogEntry({
-                                    full_message: err.stack,
-
-                                    _user: userData._id.toString(),
-                                    _address: recipient,
-
-                                    _no_store: 'yes',
-                                    _error: 'failed to store message',
-                                    _failure: 'yes',
-                                    _err_code: err.code
-                                });
-
-                                // might be an isse to reject if some recipients were already processed
-                                plugin.loginfo('DEFERRED rcpt=' + recipient + ' error=' + err.message, plugin, connection);
-                                tnx.notes.rejectCode = 'ERRQ05';
-                                return next(DENYSOFT, 'Failed to queue message [ERRQ05]');
-                            }
-
-                            let targetMailbox;
-                            let targetId;
-                            let isSpam = false;
-                            let filterMessages = [];
-                            let matchingFilters;
-                            if (response && response.filterResults && response.filterResults.length) {
-                                response.filterResults.forEach(entry => {
-                                    if (entry.forward) {
-                                        sendLogEntry({
-                                            short_message: '[Queued forward] ' + queueId,
-                                            _user: userData._id.toString(),
-                                            _to: recipient,
-                                            _mail_action: 'forward',
-                                            _target_queue_id: entry['forward-queue-id'],
-                                            _target_address: entry.forward
-                                        });
-
-                                        plugin.loggelf({
-                                            short_message: '[QUEUED] ' + entry['forward-queue-id'],
-                                            _queue_id: entry['forward-queue-id'],
-
-                                            _parent_queue_id: queueId,
-                                            _from: recipient,
-                                            _to: entry.forward,
-
-                                            _queued: 'yes',
-                                            _forwarded: 'yes',
-
-                                            _interface: 'mx'
-                                        });
-                                        return;
-                                    }
-
-                                    if (entry.autoreply) {
-                                        sendLogEntry({
-                                            short_message: '[Queued autoreply] ' + queueId,
-                                            _mail_action: 'autoreply',
-                                            _user: userData._id.toString(),
-                                            _to: recipient,
-                                            _target_queue_id: entry['autoreply-queue-id'],
-                                            _target_address: entry.autoreply
-                                        });
-
-                                        plugin.loggelf({
-                                            short_message: '[QUEUED] ' + entry['autoreply-queue-id'],
-                                            _queue_id: entry['autoreply-queue-id'],
-
-                                            _parent_queue_id: queueId,
-                                            _from: recipient,
-                                            _to: entry.autoreply,
-
-                                            _queued: 'yes',
-                                            _autoreply: 'yes',
-
-                                            _interface: 'mx'
-                                        });
-                                        return;
-                                    }
-
-                                    if (entry.spam) {
-                                        isSpam = true;
-                                        filterMessages.push('Spam');
-                                        return;
-                                    }
-
-                                    if (entry.mailbox && entry.id) {
-                                        targetMailbox = entry.mailbox && { mailbox: entry.mailbox, path: entry.path, uid: entry.uid };
-                                        targetId = entry.id;
-                                        return;
-                                    }
-
-                                    if (entry.matchingFilters && entry.matchingFilters.length) {
-                                        matchingFilters = entry.matchingFilters;
-                                        return;
-                                    }
-
-                                    Object.keys(entry).forEach(key => {
-                                        if (!entry[key]) {
-                                            return;
-                                        }
-                                        if (typeof entry[key] === 'boolean') {
-                                            filterMessages.push(key);
-                                        } else {
-                                            filterMessages.push(key + '=' + (entry[key] || '').toString());
-                                        }
-                                    });
-                                });
-                                if (filterMessages.length) {
-                                    plugin.loginfo('FILTER ACTIONS ' + filterMessages.join(','), plugin, connection);
-                                }
-                            }
-
-                            if (response && response.error) {
-                                tnx.notes.rejectCode = response.error.code;
-
-                                if (response.error.code === 'DroppedByPolicy') {
+                        let targetMailbox;
+                        let targetId;
+                        let isSpam = false;
+                        let filterMessages = [];
+                        let matchingFilters;
+                        if (response && response.filterResults && response.filterResults.length) {
+                            response.filterResults.forEach(entry => {
+                                if (entry.forward) {
                                     sendLogEntry({
-                                        full_message: response.error.message,
-
+                                        short_message: '[Queued forward] ' + queueId,
                                         _user: userData._id.toString(),
                                         _to: recipient,
-                                        _filter: filterMessages.length ? filterMessages.join('\n') : '',
-                                        _filter_is_spam: isSpam ? 'yes' : 'no',
-                                        _filters_matching: matchingFilters ? matchingFilters.join('\n') : '',
-
-                                        _no_store: 'yes',
-                                        _error: 'message dropped',
-                                        _dropped: 'yes',
-                                        _err_code: response.error.code
+                                        _mail_action: 'forward',
+                                        _target_queue_id: entry['forward-queue-id'],
+                                        _target_address: entry.forward
                                     });
-                                    plugin.loginfo(
-                                        'DROPPED rcpt=' + recipient + ' user=' + userData.address + '[' + userData._id + '] error=' + response.error.message,
-                                        plugin,
-                                        connection
-                                    );
 
-                                    // appears as accepted
-                                    return setImmediate(storeNext);
+                                    plugin.loggelf({
+                                        short_message: '[QUEUED] ' + entry['forward-queue-id'],
+                                        _queue_id: entry['forward-queue-id'],
+
+                                        _parent_queue_id: queueId,
+                                        _from: recipient,
+                                        _to: entry.forward,
+
+                                        _queued: 'yes',
+                                        _forwarded: 'yes',
+
+                                        _interface: 'mx'
+                                    });
+                                    return;
                                 }
 
+                                if (entry.autoreply) {
+                                    sendLogEntry({
+                                        short_message: '[Queued autoreply] ' + queueId,
+                                        _mail_action: 'autoreply',
+                                        _user: userData._id.toString(),
+                                        _to: recipient,
+                                        _target_queue_id: entry['autoreply-queue-id'],
+                                        _target_address: entry.autoreply
+                                    });
+
+                                    plugin.loggelf({
+                                        short_message: '[QUEUED] ' + entry['autoreply-queue-id'],
+                                        _queue_id: entry['autoreply-queue-id'],
+
+                                        _parent_queue_id: queueId,
+                                        _from: recipient,
+                                        _to: entry.autoreply,
+
+                                        _queued: 'yes',
+                                        _autoreply: 'yes',
+
+                                        _interface: 'mx'
+                                    });
+                                    return;
+                                }
+
+                                if (entry.spam) {
+                                    isSpam = true;
+                                    filterMessages.push('Spam');
+                                    return;
+                                }
+
+                                if (entry.mailbox && entry.id) {
+                                    targetMailbox = entry.mailbox && { mailbox: entry.mailbox, path: entry.path, uid: entry.uid };
+                                    targetId = entry.id;
+                                    return;
+                                }
+
+                                if (entry.matchingFilters && entry.matchingFilters.length) {
+                                    matchingFilters = entry.matchingFilters;
+                                    return;
+                                }
+
+                                Object.keys(entry).forEach(key => {
+                                    if (!entry[key]) {
+                                        return;
+                                    }
+                                    if (typeof entry[key] === 'boolean') {
+                                        filterMessages.push(key);
+                                    } else {
+                                        filterMessages.push(key + '=' + (entry[key] || '').toString());
+                                    }
+                                });
+                            });
+                            if (filterMessages.length) {
+                                plugin.loginfo('FILTER ACTIONS ' + filterMessages.join(','), plugin, connection);
+                            }
+                        }
+
+                        if (response && response.error) {
+                            tnx.notes.rejectCode = response.error.code;
+
+                            if (response.error.code === 'DroppedByPolicy') {
                                 sendLogEntry({
-                                    full_message: response.error.stack,
+                                    full_message: response.error.message,
 
                                     _user: userData._id.toString(),
                                     _to: recipient,
@@ -1459,47 +1417,70 @@ exports.hook_queue = function (next, connection) {
                                     _filters_matching: matchingFilters ? matchingFilters.join('\n') : '',
 
                                     _no_store: 'yes',
-                                    _error: 'failed to store message',
-                                    _failure: 'yes',
+                                    _error: 'message dropped',
+                                    _dropped: 'yes',
                                     _err_code: response.error.code
                                 });
                                 plugin.loginfo(
-                                    'DEFERRED rcpt=' + recipient + ' user=' + userData.address + '[' + userData._id + '] error=' + response.error.message,
+                                    'DROPPED rcpt=' + recipient + ' user=' + userData.address + '[' + userData._id + '] error=' + response.error.message,
                                     plugin,
                                     connection
                                 );
 
-                                return next(DENYSOFT, response.error.message);
+                                // appears as accepted
+                                return setImmediate(storeNext);
                             }
 
                             sendLogEntry({
+                                full_message: response.error.stack,
+
                                 _user: userData._id.toString(),
                                 _to: recipient,
-                                _stored: 'yes',
-                                _store_result: response.response,
                                 _filter: filterMessages.length ? filterMessages.join('\n') : '',
                                 _filter_is_spam: isSpam ? 'yes' : 'no',
                                 _filters_matching: matchingFilters ? matchingFilters.join('\n') : '',
 
-                                _stored_mailbox: targetMailbox && targetMailbox.mailbox,
-                                _stored_path: targetMailbox && targetMailbox.path,
-                                _stored_uid: targetMailbox && targetMailbox.uid,
-
-                                _stored_id: targetId
+                                _no_store: 'yes',
+                                _error: 'failed to store message',
+                                _failure: 'yes',
+                                _err_code: response.error.code
                             });
-
                             plugin.loginfo(
-                                'STORED rcpt=' + recipient + ' user=' + userData.address + '[' + userData._id + '] result=' + response.response,
+                                'DEFERRED rcpt=' + recipient + ' user=' + userData.address + '[' + userData._id + '] error=' + response.error.message,
                                 plugin,
                                 connection
                             );
 
-                            setImmediate(storeNext);
+                            return next(DENYSOFT, response.error.message);
                         }
-                    );
-                };
-                storeNext();
-            });
+
+                        sendLogEntry({
+                            _user: userData._id.toString(),
+                            _to: recipient,
+                            _stored: 'yes',
+                            _store_result: response.response,
+                            _filter: filterMessages.length ? filterMessages.join('\n') : '',
+                            _filter_is_spam: isSpam ? 'yes' : 'no',
+                            _filters_matching: matchingFilters ? matchingFilters.join('\n') : '',
+
+                            _stored_mailbox: targetMailbox && targetMailbox.mailbox,
+                            _stored_path: targetMailbox && targetMailbox.path,
+                            _stored_uid: targetMailbox && targetMailbox.uid,
+
+                            _stored_id: targetId
+                        });
+
+                        plugin.loginfo(
+                            'STORED rcpt=' + recipient + ' user=' + userData.address + '[' + userData._id + '] result=' + response.response,
+                            plugin,
+                            connection
+                        );
+
+                        setImmediate(storeNext);
+                    }
+                );
+            };
+            storeNext();
         });
     });
 };
@@ -1589,73 +1570,34 @@ exports.getHeaderFrom = function (tnx) {
         .shift();
 };
 
-exports.getHeaderAddresses = function (tnx, next) {
-    const plugin = this;
+// Filter recipients that are referenced in message headers To: or Cc fields
+exports.getReferencedUsers = function (tnx) {
+    const { users } = tnx.notes.targets;
 
-    let toAddresses = new Map();
-    let ccAddresses = new Map();
-    let unique = new Set();
+    let referencedUsers = new Set();
 
-    [].concat(tnx.header.get_all('To') || []).forEach(entry => {
-        let walk = addresses => {
-            addresses.forEach(address => {
-                if (address.address) {
-                    let normalized = tools.normalizeAddress(address.address, false, { removeLabel: true });
-                    let uview = tools.uview(normalized);
-                    toAddresses.set(uview, { address: normalized, provided: address });
-                    unique.add(uview);
-                } else if (address.group) {
-                    walk(address.group);
-                }
-            });
-        };
-        walk(addressparser(entry));
-    });
-
-    [].concat(tnx.header.get_all('Cc') || []).forEach(entry => {
-        let walk = addresses => {
-            addresses.forEach(address => {
-                if (address.address) {
-                    let normalized = tools.normalizeAddress(address.address, false, { removeLabel: true });
-                    let uview = tools.uview(normalized);
-                    if (!toAddresses.has(uview)) {
-                        ccAddresses.set(uview, { address: normalized, provided: address });
-                    }
-                    unique.add(normalized);
-                } else if (address.group) {
-                    walk(address.group);
-                }
-            });
-        };
-        walk(addressparser(entry));
-    });
-
-    plugin.db.users
-        .collection('addresses')
-        .find({ addrview: { $in: Array.from(unique) } })
-        .toArray((err, list) => {
-            if (err) {
-                return next(err);
-            }
-
-            if (list && list.length) {
-                list.forEach(addressData => {
-                    if (toAddresses.has(addressData.addrview)) {
-                        addressData.provided = toAddresses.get(addressData.addrview).provided;
-                        toAddresses.set(addressData.addrview, addressData);
-                    }
-                    if (ccAddresses.has(addressData.addrview)) {
-                        addressData.provided = ccAddresses.get(addressData.addrview).provided;
-                        ccAddresses.set(addressData.addrview, addressData);
+    []
+        .concat(tnx.header.get_all('To') || [])
+        .concat(tnx.header.get_all('Cc') || [])
+        .forEach(entry => {
+            let walk = addresses => {
+                addresses.forEach(address => {
+                    if (address.address) {
+                        for (let user of users.values()) {
+                            if (user.recipient === address.address) {
+                                referencedUsers.add(user);
+                                break;
+                            }
+                        }
+                    } else if (address.group) {
+                        walk(address.group);
                     }
                 });
-            }
-
-            next(null, {
-                to: toAddresses,
-                cc: ccAddresses
-            });
+            };
+            walk(addressparser(entry));
         });
+
+    return referencedUsers;
 };
 
 exports.rspamdSymbols = function (tnx) {
