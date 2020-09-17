@@ -232,6 +232,7 @@ exports.hook_deny = function (next, connection, params) {
         let headerFrom = plugin.getHeaderFrom(tnx);
         if (headerFrom) {
             logdata._header_from = headerFrom.address;
+            logdata._header_from_name = headerFrom.address;
             logdata._header_from_value = tnx.header.get_all('From').join('; ');
         }
 
@@ -980,6 +981,7 @@ exports.hook_queue = function (next, connection) {
                 _spam_action: rspamd ? rspamd.action : '',
                 _from: envelopeFrom,
                 _header_from: headerFrom.address,
+                _header_from_name: headerFrom.name,
                 _header_from_value: tnx.header.get_all('From').join('; '),
                 _subject: subject
             };
