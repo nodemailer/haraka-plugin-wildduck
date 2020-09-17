@@ -925,12 +925,12 @@ exports.hook_queue = function (next, connection) {
         verificationResults.spf = tools.normalizeDomain(spfResultsHelo.domain);
     }
 
+    let envelopeFrom = tnx.notes.sender;
+    let headerFrom = plugin.getHeaderFrom(tnx);
+
     // find domain that DKIM signed this message. Prefer header from, otherwise use envelope from
     if (tnx.notes.dkim_results) {
         let dkimResults = Array.isArray(tnx.notes.dkim_results) ? tnx.notes.dkim_results : [].concat(tnx.notes.dkim_results || []);
-
-        let envelopeFrom = tnx.notes.sender;
-        let headerFrom = plugin.getHeaderFrom(tnx);
 
         let envelopeDomain = (envelopeFrom && envelopeFrom.split('@').pop()) || '';
         let headerDomain = (headerFrom && headerFrom.address && headerFrom.address.split('@').pop()) || '';
@@ -978,7 +978,8 @@ exports.hook_queue = function (next, connection) {
                 _message_id: messageId.replace(/^[\s<]+|[\s>]+$/g, ''),
                 _spam_score: rspamd ? rspamd.score : '',
                 _spam_action: rspamd ? rspamd.action : '',
-                _from: tnx.notes.sender,
+                _from: envelopeFrom,
+                _header_from: headerFrom.address,
                 _subject: subject
             };
 
