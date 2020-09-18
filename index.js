@@ -1333,7 +1333,8 @@ exports.hook_queue = function (next, connection) {
                                     _content_type: attachment.contentType,
                                     _attachment_disposition: attachment.disposition,
                                     _attachment_size: attachment.size,
-                                    _attachment_endocing: attachment.transferEncoding
+                                    _attachment_encoding: attachment.transferEncoding,
+                                    _accatchment_count: response.attachments.length
                                 });
                             });
                         }
