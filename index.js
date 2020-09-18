@@ -1320,6 +1320,24 @@ exports.hook_queue = function (next, connection) {
                         let isSpam = false;
                         let filterMessages = [];
                         let matchingFilters;
+
+                        if (response && response.attachments && response.attachments.length) {
+                            response.attachments.forEach(attachment => {
+                                sendLogEntry({
+                                    short_message: '[ATT] ' + attachment.id,
+                                    _user: userData._id.toString(),
+                                    _to: recipient,
+                                    _mail_action: 'attachment',
+                                    _attachment_id: attachment.id,
+                                    _filename: attachment.filename,
+                                    _content_type: attachment.contentType,
+                                    _attachment_disposition: attachment.disposition,
+                                    _attachment_size: attachment.size,
+                                    _attachment_endocing: attachment.transferEncoding
+                                });
+                            });
+                        }
+
                         if (response && response.filterResults && response.filterResults.length) {
                             response.filterResults.forEach(entry => {
                                 if (entry.forward) {
