@@ -616,7 +616,8 @@ exports.real_rcpt_handler = function (next, connection, params) {
                                 pubKey: true,
                                 spamLevel: true,
                                 storageUsed: true,
-                                quota: true
+                                quota: true,
+                                tagsview: true
                             }
                         },
                         (err, userData) => {
@@ -774,7 +775,8 @@ exports.real_rcpt_handler = function (next, connection, params) {
                     pubKey: true,
                     spamLevel: true,
                     storageUsed: true,
-                    quota: true
+                    quota: true,
+                    tagsview: true
                 },
                 (err, userData) => {
                     if (err) {
