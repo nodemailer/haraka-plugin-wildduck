@@ -1,6 +1,6 @@
 {
     "name": "haraka-plugin-wildduck",
-    "version": "1.29.5",
+    "version": "1.29.6",
     "description": "Haraka plugin for processing incoming messages for Wild Duck IMAP server",
     "main": "index.js",
     "scripts": {
@@ -41,6 +41,6 @@
         "mongodb": "3.6.3",
         "nodemailer": "6.4.16",
         "srs.js": "0.1.0",
-        "wildduck": "1.31.0"
+        "wildduck": "1.31.1"
     }
 }
