@@ -1092,14 +1092,14 @@ exports.hook_queue = function (next, connection) {
                 if (err) {
                     err.code = err.code || 'ERRCOMPOSE';
                     sendLogEntry({
+                        short_message: '[Failed forward] ' + queueId,
                         full_message: err.stack,
 
                         _error: 'failed to store message',
+                        _mail_action: 'forward',
                         _failure: 'yes',
                         _err_code: err.code
                     });
-                    tnx.notes.rejectCode = 'ERRQ03';
-                    return next(DENYSOFT, 'Failed to queue message [ERRQ03]');
                 }
                 return done(err, ...args);
             }
@@ -1199,9 +1199,8 @@ exports.hook_queue = function (next, connection) {
                         if (err) {
                             // don't really care
                             plugin.lognotice('AUTOREPLY ERROR target=' + tnx.notes.sender + ' error=' + err.message, plugin, connection);
-                            return processNext();
                         }
-                        return done(err, ...args);
+                        return processNext();
                     }
 
                     sendLogEntry({
@@ -1227,7 +1226,7 @@ exports.hook_queue = function (next, connection) {
                     });
 
                     plugin.loginfo('QUEUED AUTOREPLY target=' + tnx.notes.sender + ' queue-id=' + args[0].id, plugin, connection);
-                    return done(err, ...args);
+                    return processNext();
                 }
             );
         };
