@@ -1262,6 +1262,7 @@ exports.hook_queue = function (next, connection) {
                     mimeTree: prepared && prepared.mimeTree,
                     maildata: prepared && prepared.maildata,
                     user: userData,
+                    mailbox: rcptData.mailbox, // might be set by an additional plugin
                     sender: tnx.notes.sender,
                     recipient,
                     chunks: collector.chunks,
@@ -1397,6 +1398,7 @@ exports.hook_queue = function (next, connection) {
                             }
                         });
                     });
+
                     if (filterMessages.length) {
                         plugin.loginfo('FILTER ACTIONS ' + filterMessages.join(','), plugin, connection);
                     }
@@ -1508,6 +1510,7 @@ exports.hook_queue = function (next, connection) {
             storeMessages()
                 .then(args => next(...args))
                 .catch(err => {
+                    // should not happen, just in case
                     sendLogEntry({
                         full_message: err.stack,
                         _no_store: 'yes',
