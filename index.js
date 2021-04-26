@@ -37,7 +37,7 @@ let defaultSpamRejectMessage =
 
 exports.register = function () {
     const plugin = this;
-    plugin.logdebug('Initializing rcpt_to Wild Duck plugin.', plugin);
+    plugin.logdebug('Initializing Wild Duck plugin.', plugin);
     plugin.load_wildduck_ini();
 
     plugin.register_hook('init_master', 'init_wildduck_shared');
