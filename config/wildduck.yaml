@@ -61,9 +61,6 @@ attachments:
     bucket: 'attachments'
     decodeBase64: true
 
-log:
-    authlogExpireDays: 30
-
 limits:
     windowSize: 3600 # 1 hour
     rcptIp: 100 # allowed messages for the same recipient from same IP during window size

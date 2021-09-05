@@ -7,10 +7,10 @@
 process.env.DISABLE_WILD_CONFIG = 'true';
 
 const os = require('os');
-const ObjectID = require('mongodb').ObjectID;
+const ObjectId = require('mongodb').ObjectId;
 const db = require('./lib/db');
 const DSN = require('haraka-dsn');
-const punycode = require('punycode');
+const punycode = require('punycode/');
 const SRS = require('srs.js');
 const counters = require('wildduck/lib/counters');
 const tools = require('wildduck/lib/tools');
@@ -18,7 +18,6 @@ const StreamCollect = require('./lib/stream-collect');
 const Maildropper = require('wildduck/lib/maildropper');
 const FilterHandler = require('wildduck/lib/filter-handler');
 const autoreply = require('wildduck/lib/autoreply');
-const consts = require('wildduck/lib/consts');
 const wdErrors = require('wildduck/lib/errors');
 const Gelf = require('gelf');
 const addressparser = require('nodemailer/lib/addressparser');
@@ -262,7 +261,7 @@ exports.hook_mail = function (next, connection, params) {
     let from = params[0];
     tnx.notes.sender = from.address();
 
-    tnx.notes.id = new ObjectID();
+    tnx.notes.id = new ObjectId();
     tnx.notes.rateKeys = [];
     tnx.notes.targets = {
         users: new Map(),
@@ -287,7 +286,17 @@ exports.hook_mail = function (next, connection, params) {
         _proto: tnx.notes.transmissionType
     });
 
-    return next();
+    db.settingsHandler
+        .getMulti(['const:max:storage', 'const:max:recipients', 'const:max:forwards'])
+        .then(settings => {
+            tnx.notes.settings = settings;
+            next();
+        })
+        .catch(err => {
+            plugin.logerror(err, plugin, connection);
+            tnx.notes.rejectCode = 'ERRC04';
+            return next(DENYSOFT, 'Failed to process address, try again [ERRC04]');
+        });
 };
 
 exports.hook_rcpt = function (next, connection, params) {
@@ -482,7 +491,7 @@ exports.real_rcpt_handler = function (next, connection, params) {
         plugin.ttlcounter(
             'wdf:' + addressData._id.toString(),
             addressData.targets.length,
-            addressData.forwards || consts.MAX_FORWARDS,
+            addressData.forwards || tnx.notes.settings['const:max:forwards'],
             false,
             (err, result) => {
                 if (err) {
@@ -653,7 +662,7 @@ exports.real_rcpt_handler = function (next, connection, params) {
                             }
 
                             // max quota for the user
-                            let quota = userData.quota || consts.MAX_STORAGE;
+                            let quota = userData.quota || tnx.notes.settings['const:max:storage'];
                             if (userData.storageUsed && quota <= userData.storageUsed) {
                                 // can not deliver mail to this user, over quota, skip
                                 forwardTargets.push(targetData.value + ':' + userData._id + '[over_quota]');
@@ -817,8 +826,7 @@ exports.real_rcpt_handler = function (next, connection, params) {
                     }
 
                     // max quota for the user
-                    let quota = userData.quota || consts.MAX_STORAGE;
-
+                    let quota = userData.quota || tnx.notes.settings['const:max:storage'];
                     if (userData.storageUsed && quota <= userData.storageUsed) {
                         // can not deliver mail to this user, over quota
                         resolution = {
