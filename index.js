@@ -286,7 +286,7 @@ exports.hook_mail = function (next, connection, params) {
         _proto: tnx.notes.transmissionType
     });
 
-    db.settingsHandler
+    plugin.db.settingsHandler
         .getMulti(['const:max:storage', 'const:max:recipients', 'const:max:forwards'])
         .then(settings => {
             tnx.notes.settings = settings;
