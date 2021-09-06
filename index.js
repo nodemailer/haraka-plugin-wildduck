@@ -1163,86 +1163,77 @@ exports.hook_queue = function (next, connection) {
         }
     };
 
-    let sendAutoreplies = done => {
+    let sendAutoreplies = async () => {
         if (!autoreplies.size) {
-            return done();
+            return;
         }
 
         let curtime = new Date();
-        let pos = 0;
-        let targets = Array.from(autoreplies);
-        let processNext = () => {
-            if (pos >= targets.length) {
-                return done();
-            }
 
-            let target = targets[pos++];
+        for (let target of autoreplies) {
             let addressData = target[1];
 
             let autoreplyData = addressData.autoreply;
             autoreplyData._id = autoreplyData._id || addressData._id;
 
             if (!autoreplyData || !autoreplyData.status) {
-                return setImmediate(processNext);
+                continue;
             }
 
             if (autoreplyData.start && autoreplyData.start > curtime) {
-                return setImmediate(processNext);
+                continue;
             }
 
             if (autoreplyData.end && autoreplyData.end < curtime) {
-                return setImmediate(processNext);
+                continue;
             }
 
-            autoreply(
-                {
-                    db: plugin.db,
-                    queueId,
-                    maildrop: plugin.maildrop,
-                    sender: tnx.notes.sender,
-                    recipient: addressData.address,
-                    chunks: collector.chunks,
-                    chunklen: collector.chunklen,
-                    messageHandler: plugin.db.messageHandler
-                },
-                autoreplyData,
-                (err, ...args) => {
-                    if (err || !args[0]) {
-                        if (err) {
-                            // don't really care
-                            plugin.lognotice('AUTOREPLY ERROR target=' + tnx.notes.sender + ' error=' + err.message, plugin, connection);
-                        }
-                        return processNext();
-                    }
+            try {
+                let result = await autoreply(
+                    {
+                        db: plugin.db,
+                        queueId,
+                        maildrop: plugin.maildrop,
+                        sender: tnx.notes.sender,
+                        recipient: addressData.address,
+                        chunks: collector.chunks,
+                        chunklen: collector.chunklen,
+                        messageHandler: plugin.db.messageHandler
+                    },
+                    autoreplyData
+                );
 
-                    sendLogEntry({
-                        short_message: '[Queued autoreply] ' + queueId,
-                        _mail_action: 'autoreply',
-                        _target_queue_id: args[0].id,
-                        _target_address: addressData.address
-                    });
-
-                    plugin.loggelf({
-                        _queue_id: args[0].id,
-
-                        short_message: '[QUEUED] ' + args[0].id,
-
-                        _parent_queue_id: queueId,
-                        _from: addressData.address,
-                        _to: addressData.address,
-
-                        _queued: 'yes',
-                        _autoreply: 'yes',
-
-                        _interface: 'mx'
-                    });
-
-                    plugin.loginfo('QUEUED AUTOREPLY target=' + tnx.notes.sender + ' queue-id=' + args[0].id, plugin, connection);
-                    return processNext();
+                if (!result) {
+                    continue;
                 }
-            );
-        };
-        processNext();
+
+                sendLogEntry({
+                    short_message: '[Queued autoreply] ' + queueId,
+                    _mail_action: 'autoreply',
+                    _target_queue_id: result.id,
+                    _target_address: addressData.address
+                });
+
+                plugin.loggelf({
+                    _queue_id: result.id,
+
+                    short_message: '[QUEUED] ' + result.id,
+
+                    _parent_queue_id: queueId,
+                    _from: addressData.address,
+                    _to: addressData.address,
+
+                    _queued: 'yes',
+                    _autoreply: 'yes',
+
+                    _interface: 'mx'
+                });
+
+                plugin.loginfo('QUEUED AUTOREPLY target=' + tnx.notes.sender + ' queue-id=' + result.id, plugin, connection);
+            } catch (err) {
+                plugin.lognotice('AUTOREPLY ERROR target=' + tnx.notes.sender + ' error=' + err.message, plugin, connection);
+            }
+        }
     };
 
     // update rate limit counters for all recipients
@@ -1514,24 +1505,28 @@ exports.hook_queue = function (next, connection) {
     // try to forward the message. If forwarding is not needed then continues immediatelly
     forwardMessage(() => {
         // send autoreplies to forwarded addresses (if needed)
-        sendAutoreplies(() => {
-            storeMessages()
-                .then(args => next(...args))
-                .catch(err => {
-                    // should not happen, just in case
-                    sendLogEntry({
-                        full_message: err.stack,
-                        _no_store: 'yes',
-                        _error: 'failed to store message',
-                        _failure: 'yes',
-                        _err_code: err.code
-                    });
+        sendAutoreplies()
+            .catch(err => {
+                plugin.logerror('AUTOREPLY error=' + err.message, plugin, connection);
+            })
+            .finally(() => {
+                storeMessages()
+                    .then(args => next(...args))
+                    .catch(err => {
+                        // should not happen, just in case
+                        sendLogEntry({
+                            full_message: err.stack,
+                            _no_store: 'yes',
+                            _error: 'failed to store message',
+                            _failure: 'yes',
+                            _err_code: err.code
+                        });
 
-                    plugin.loginfo('DEFERRED error=' + err.message, plugin, connection);
-                    tnx.notes.rejectCode = 'ERRQ06';
-                    return [DENYSOFT, 'Failed to queue message [ERRQ06]'];
-                });
-        });
+                        plugin.loginfo('DEFERRED error=' + err.message, plugin, connection);
+                        tnx.notes.rejectCode = 'ERRQ06';
+                        next(DENYSOFT, 'Failed to queue message [ERRQ06]');
+                    });
+            });
     });
 };
 
