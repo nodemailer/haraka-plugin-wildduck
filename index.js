@@ -105,6 +105,7 @@ exports.open_database = function (server, next) {
                 delete message[key];
             }
         });
+
         plugin.gelf.emit('gelf.log', message);
     };
 
