@@ -1491,10 +1491,20 @@ exports.hook_queue = function (next, connection) {
                     _err_code: err.code
                 });
 
-                // might be an isse to reject if some recipients were already processed
-                plugin.loginfo('DEFERRED rcpt=' + recipient + ' error=' + err.message, plugin, connection);
-                tnx.notes.rejectCode = 'ERRQ05';
-                return [DENYSOFT, 'Failed to queue message [ERRQ05]'];
+                switch (err.code) {
+                    case 15: {
+                        // MongoDB overflow
+                        plugin.loginfo('REJECTED rcpt=' + recipient + ' error=' + err.message, plugin, connection);
+                        tnx.notes.rejectCode = 'ERRQ07';
+                        return [DENY, 'Failed to queue message, too many nested attachments [ERRQ07]'];
+                    }
+                    default: {
+                        // might be an isse to reject if some recipients were already processed
+                        plugin.loginfo('DEFERRED rcpt=' + recipient + ' error=' + err.message, plugin, connection);
+                        tnx.notes.rejectCode = 'ERRQ05';
+                        return [DENYSOFT, 'Failed to queue message [ERRQ05]'];
+                    }
+                }
             }
         }
 
