@@ -17,11 +17,13 @@ const tools = require('wildduck/lib/tools');
 const StreamCollect = require('./lib/stream-collect');
 const Maildropper = require('wildduck/lib/maildropper');
 const FilterHandler = require('wildduck/lib/filter-handler');
+const BimiHandler = require('wildduck/lib/bimi-handler');
 const autoreply = require('wildduck/lib/autoreply');
 const wdErrors = require('wildduck/lib/errors');
 const Gelf = require('gelf');
 const addressparser = require('nodemailer/lib/addressparser');
 const libmime = require('libmime');
+const util = require('util');
 
 DSN.rcpt_too_fast = () =>
     DSN.create(
@@ -135,6 +137,11 @@ exports.open_database = function (server, next) {
                 loggelf: message => plugin.loggelf(message)
             });
 
+            plugin.bimiHandler = BimiHandler.create({
+                database: db.database,
+                loggelf: message => plugin.loggelf(message)
+            });
+
             done();
         });
     };
@@ -188,15 +195,15 @@ exports.init_wildduck_shared = function (next, server) {
 
 exports.hook_deny = function (next, connection, params) {
     const plugin = this;
-    const tnx = connection.transaction;
+    const txn = connection.transaction;
     let remoteIp = connection.remote_ip;
 
-    if (tnx === null) {
+    if (txn === null) {
         next();
         return;
     }
 
-    let rcpts = tnx.rcpt_to || [];
+    let rcpts = txn.rcpt_to || [];
     if (!rcpts.length) {
         rcpts = [false];
     }
@@ -205,9 +212,9 @@ exports.hook_deny = function (next, connection, params) {
         let user;
         let address = (rcpt && rcpt.address()) || false;
 
-        if (tnx.notes.targets && tnx.notes.targets.users) {
+        if (txn.notes.targets && txn.notes.targets.users) {
             // try to resolve user id for the recipient address
-            for (let target of tnx.notes.targets.users) {
+            for (let target of txn.notes.targets.users) {
                 let uid = target[0];
                 let info = target[1];
                 if (info && info.recipient === address) {
@@ -217,23 +224,23 @@ exports.hook_deny = function (next, connection, params) {
         }
 
         let logdata = {
-            short_message: '[DENY:' + tnx.notes.sender + '] ' + tnx.uuid,
+            short_message: '[DENY:' + txn.notes.sender + '] ' + txn.uuid,
             _mail_action: 'deny',
-            _from: tnx.notes.sender,
-            _queue_id: tnx.uuid,
+            _from: txn.notes.sender,
+            _queue_id: txn.uuid,
             _ip: remoteIp,
-            _proto: tnx.notes.transmissionType,
+            _proto: txn.notes.transmissionType,
             _to: address,
             _user: user,
             _rejector: params && params[2],
-            _reject_code: tnx.notes.rejectCode || (params && params[2]) || 'UNKNOWN'
+            _reject_code: txn.notes.rejectCode || (params && params[2]) || 'UNKNOWN'
         };
 
-        let headerFrom = plugin.getHeaderFrom(tnx);
+        let headerFrom = plugin.getHeaderFrom(txn);
         if (headerFrom) {
             logdata._header_from = headerFrom.address;
             logdata._header_from_name = headerFrom.provided && headerFrom.provided.name;
-            logdata._header_from_value = tnx.header.get_all('From').join('; ');
+            logdata._header_from_value = txn.header.get_all('From').join('; ');
         }
 
         let err = params && params[1];
@@ -257,52 +264,52 @@ exports.hook_deny = function (next, connection, params) {
 
 exports.hook_mail = function (next, connection, params) {
     const plugin = this;
-    const tnx = connection.transaction;
+    const txn = connection.transaction;
 
     let from = params[0];
-    tnx.notes.sender = from.address();
+    txn.notes.sender = from.address();
 
-    tnx.notes.id = new ObjectId();
-    tnx.notes.rateKeys = [];
-    tnx.notes.targets = {
+    txn.notes.id = new ObjectId();
+    txn.notes.rateKeys = [];
+    txn.notes.targets = {
         users: new Map(),
         forwards: new Map(),
         recipients: new Set(),
         autoreplies: new Map()
     };
 
-    tnx.notes.transmissionType = []
+    txn.notes.transmissionType = []
         .concat(connection.greeting === 'EHLO' ? 'E' : [])
         .concat('SMTP')
         .concat(connection.tls_cipher ? 'S' : [])
         .join('');
 
     plugin.loggelf({
-        short_message: '[MAIL FROM:' + tnx.notes.sender + '] ' + tnx.uuid,
+        short_message: '[MAIL FROM:' + txn.notes.sender + '] ' + txn.uuid,
 
         _mail_action: 'mail_from',
-        _from: tnx.notes.sender,
-        _queue_id: tnx.uuid,
+        _from: txn.notes.sender,
+        _queue_id: txn.uuid,
         _ip: connection.remote_ip,
-        _proto: tnx.notes.transmissionType
+        _proto: txn.notes.transmissionType
     });
 
     plugin.db.settingsHandler
         .getMulti(['const:max:storage', 'const:max:recipients', 'const:max:forwards'])
         .then(settings => {
-            tnx.notes.settings = settings;
+            txn.notes.settings = settings;
             next();
         })
         .catch(err => {
             plugin.logerror(err, plugin, connection);
-            tnx.notes.rejectCode = 'ERRC04';
+            txn.notes.rejectCode = 'ERRC04';
             return next(DENYSOFT, 'Failed to process address, try again [ERRC04]');
         });
 };
 
 exports.hook_rcpt = function (next, connection, params) {
     const plugin = this;
-    const tnx = connection.transaction;
+    const txn = connection.transaction;
 
     let tryCount = 0;
     let tryTimer = false;
@@ -321,7 +328,7 @@ exports.hook_rcpt = function (next, connection, params) {
                 let err = args && args[0];
                 if (err && /Error$/.test(err.name)) {
                     plugin.logerror(err, plugin, connection);
-                    tnx.notes.rejectCode = 'ERRC01';
+                    txn.notes.rejectCode = 'ERRC01';
                     return next(DENYSOFT, 'Failed to process recipient, try again [ERRC01]');
                 }
                 next(...args);
@@ -344,7 +351,7 @@ exports.hook_rcpt = function (next, connection, params) {
             }
             clearTimeout(waitTimeout);
             returned = true;
-            tnx.notes.rejectCode = 'ERRC02';
+            txn.notes.rejectCode = 'ERRC02';
             return next(DENYSOFT, 'Failed to process recipient, try again [ERRC02]');
         }
         runHandler();
@@ -356,7 +363,7 @@ exports.hook_rcpt = function (next, connection, params) {
             return;
         }
         returned = true;
-        tnx.notes.rejectCode = 'ERRC03';
+        txn.notes.rejectCode = 'ERRC03';
         return next(DENYSOFT, 'Failed to process recipient, try again [ERRC03]');
     }, 8 * 1000);
 
@@ -365,15 +372,15 @@ exports.hook_rcpt = function (next, connection, params) {
 
 exports.real_rcpt_handler = function (next, connection, params) {
     const plugin = this;
-    const tnx = connection.transaction;
+    const txn = connection.transaction;
     const remoteIp = connection.remote_ip;
 
-    const { recipients, forwards, autoreplies, users } = tnx.notes.targets;
+    const { recipients, forwards, autoreplies, users } = txn.notes.targets;
 
     let rcpt = params[0];
     if (/\*/.test(rcpt.user)) {
         // Using * is not allowed in addresses
-        tnx.notes.rejectCode = 'NO_SUCH_USER';
+        txn.notes.rejectCode = 'NO_SUCH_USER';
         return next(DENY, DSN.no_such_user());
     }
 
@@ -385,13 +392,13 @@ exports.real_rcpt_handler = function (next, connection, params) {
     let hookDone = (...args) => {
         if (resolution) {
             let message = {
-                short_message: '[RCPT TO:' + rcpt.address() + '] ' + tnx.uuid,
+                short_message: '[RCPT TO:' + rcpt.address() + '] ' + txn.uuid,
                 _mail_action: 'rcpt_to',
-                _from: tnx.notes.sender,
+                _from: txn.notes.sender,
                 _to: rcpt.address(),
-                _queue_id: tnx.uuid,
+                _queue_id: txn.uuid,
                 _ip: remoteIp,
-                _proto: tnx.notes.transmissionType
+                _proto: txn.notes.transmissionType
             };
 
             Object.keys(resolution).forEach(key => {
@@ -419,7 +426,7 @@ exports.real_rcpt_handler = function (next, connection, params) {
                     _srs: 'yes',
                     _error: 'missing domain'
                 };
-                tnx.notes.rejectCode = 'NO_SUCH_USER';
+                txn.notes.rejectCode = 'NO_SUCH_USER';
                 return hookDone(DENY, DSN.no_such_user());
             }
 
@@ -434,7 +441,7 @@ exports.real_rcpt_handler = function (next, connection, params) {
                 _error: 'srs check failed',
                 _err_code: err.code
             };
-            tnx.notes.rejectCode = 'NO_SUCH_USER';
+            txn.notes.rejectCode = 'NO_SUCH_USER';
             return hookDone(DENY, DSN.no_such_user());
         }
 
@@ -465,12 +472,12 @@ exports.real_rcpt_handler = function (next, connection, params) {
                         _selector: selector,
                         _error: 'too many attempts'
                     };
-                    tnx.notes.rejectCode = 'RATE_LIMIT';
+                    txn.notes.rejectCode = 'RATE_LIMIT';
                     return hookDone(DENYSOFT, DSN.rcpt_too_fast());
                 }
 
                 // update rate limit for this address after delivery
-                tnx.notes.rateKeys.push({ selector, key });
+                txn.notes.rateKeys.push({ selector, key });
 
                 plugin.loginfo('SRS USING rcpt=' + address + ' target=' + reversed, plugin, connection);
 
@@ -482,7 +489,7 @@ exports.real_rcpt_handler = function (next, connection, params) {
                     _forward_to: reversed
                 };
 
-                tnx.notes.rejectCode = false;
+                txn.notes.rejectCode = false;
                 return hookDone(OK);
             });
         }
@@ -492,7 +499,7 @@ exports.real_rcpt_handler = function (next, connection, params) {
         plugin.ttlcounter(
             'wdf:' + addressData._id.toString(),
             addressData.targets.length,
-            addressData.forwards || tnx.notes.settings['const:max:forwards'],
+            addressData.forwards || txn.notes.settings['const:max:forwards'],
             false,
             (err, result) => {
                 if (err) {
@@ -531,7 +538,7 @@ exports.real_rcpt_handler = function (next, connection, params) {
                         _selector: 'user',
                         _error: 'too many attempts'
                     };
-                    tnx.notes.rejectCode = 'RATE_LIMIT';
+                    txn.notes.rejectCode = 'RATE_LIMIT';
                     return hookDone(DENYSOFT, DSN.rcpt_too_fast());
                 }
 
@@ -542,7 +549,7 @@ exports.real_rcpt_handler = function (next, connection, params) {
                         _error: 'disabled forwarded address',
                         _disabled_forwarded: 'yes'
                     };
-                    tnx.notes.rejectCode = 'MBOX_DISABLED';
+                    txn.notes.rejectCode = 'MBOX_DISABLED';
                     return hookDone(DENY, DSN.mbox_disabled());
                 }
 
@@ -573,7 +580,7 @@ exports.real_rcpt_handler = function (next, connection, params) {
                             _rcpt_accepted: 'yes',
                             _forward_to: forwardTargets.join('\n') || 'empty_list'
                         };
-                        tnx.notes.rejectCode = false;
+                        txn.notes.rejectCode = false;
                         return hookDone(OK);
                     }
 
@@ -663,7 +670,7 @@ exports.real_rcpt_handler = function (next, connection, params) {
                             }
 
                             // max quota for the user
-                            let quota = userData.quota || tnx.notes.settings['const:max:storage'];
+                            let quota = userData.quota || txn.notes.settings['const:max:storage'];
                             if (userData.storageUsed && quota <= userData.storageUsed) {
                                 // can not deliver mail to this user, over quota, skip
                                 forwardTargets.push(targetData.value + ':' + userData._id + '[over_quota]');
@@ -719,12 +726,12 @@ exports.real_rcpt_handler = function (next, connection, params) {
                     _user: userData._id.toString(),
                     _default_address: rcpt.address() !== userData.address ? userData.address : ''
                 };
-                tnx.notes.rejectCode = 'RATE_LIMIT';
+                txn.notes.rejectCode = 'RATE_LIMIT';
                 return hookDone(DENYSOFT, DSN.rcpt_too_fast());
             }
 
             // update rate limit for this address after delivery
-            tnx.notes.rateKeys.push({ selector, key });
+            txn.notes.rateKeys.push({ selector, key });
 
             return done();
         });
@@ -769,7 +776,7 @@ exports.real_rcpt_handler = function (next, connection, params) {
                     _error: 'no such user',
                     _unknwon_user: 'yes'
                 };
-                tnx.notes.rejectCode = 'NO_SUCH_USER';
+                txn.notes.rejectCode = 'NO_SUCH_USER';
                 return hookDone(DENY, DSN.no_such_user());
             }
 
@@ -811,7 +818,7 @@ exports.real_rcpt_handler = function (next, connection, params) {
                             _error: 'no such user',
                             _unknwon_user: 'yes'
                         };
-                        tnx.notes.rejectCode = 'NO_SUCH_USER';
+                        txn.notes.rejectCode = 'NO_SUCH_USER';
                         return hookDone(DENY, DSN.no_such_user());
                     }
 
@@ -822,12 +829,12 @@ exports.real_rcpt_handler = function (next, connection, params) {
                             _error: 'disabled user',
                             _disabled_user: 'yes'
                         };
-                        tnx.notes.rejectCode = 'MBOX_DISABLED';
+                        txn.notes.rejectCode = 'MBOX_DISABLED';
                         return hookDone(DENY, DSN.mbox_disabled());
                     }
 
                     // max quota for the user
-                    let quota = userData.quota || tnx.notes.settings['const:max:storage'];
+                    let quota = userData.quota || txn.notes.settings['const:max:storage'];
                     if (userData.storageUsed && quota <= userData.storageUsed) {
                         // can not deliver mail to this user, over quota
                         resolution = {
@@ -836,7 +843,7 @@ exports.real_rcpt_handler = function (next, connection, params) {
                             _over_quota: 'yes',
                             _default_address: rcpt.address() !== userData.address ? userData.address : ''
                         };
-                        tnx.notes.rejectCode = 'MBOX_FULL';
+                        txn.notes.rejectCode = 'MBOX_FULL';
                         return hookDone(DENY, DSN.mbox_full());
                     }
 
@@ -868,14 +875,14 @@ exports.real_rcpt_handler = function (next, connection, params) {
                                     _user: userData._id.toString(),
                                     _default_address: rcpt.address() !== userData.address ? userData.address : ''
                                 };
-                                tnx.notes.rejectCode = 'RATE_LIMIT';
+                                txn.notes.rejectCode = 'RATE_LIMIT';
                                 return hookDone(DENYSOFT, DSN.rcpt_too_fast());
                             }
 
                             plugin.loginfo('RESOLVED rcpt=' + rcpt.address() + ' user=' + userData.address + '[' + userData._id + ']', plugin, connection);
 
                             // update rate limit for this address after delivery
-                            tnx.notes.rateKeys.push({ selector, key, limit: userData.receivedMax });
+                            txn.notes.rateKeys.push({ selector, key, limit: userData.receivedMax });
 
                             users.set(userData._id.toString(), {
                                 userData,
@@ -887,7 +894,7 @@ exports.real_rcpt_handler = function (next, connection, params) {
                                 _rcpt_accepted: 'yes',
                                 _default_address: rcpt.address() !== userData.address ? userData.address : ''
                             };
-                            tnx.notes.rejectCode = false;
+                            txn.notes.rejectCode = false;
                             return hookDone(OK);
                         });
                     });
@@ -899,54 +906,106 @@ exports.real_rcpt_handler = function (next, connection, params) {
 
 exports.hook_queue = function (next, connection) {
     const plugin = this;
-    const tnx = connection.transaction;
-    const queueId = tnx.uuid;
+    const txn = connection.transaction;
+    const queueId = txn.uuid;
     const remoteIp = connection.remote_ip;
-    const { forwards, autoreplies, users } = tnx.notes.targets;
+    const { forwards, autoreplies, users } = txn.notes.targets;
 
     const transhost = connection.hello.host;
 
-    let blacklisted = this.checkRspamdBlacklist(tnx);
+    let blacklisted = this.checkRspamdBlacklist(txn);
     if (blacklisted) {
         // can not send DSN object for hook_queue as it is converted to [object Object]
-        tnx.notes.rejectCode = blacklisted.key;
-        return next(DENY, plugin.dsnSpamResponse(tnx, blacklisted.key).reply);
+        txn.notes.rejectCode = blacklisted.key;
+        return next(DENY, plugin.dsnSpamResponse(txn, blacklisted.key).reply);
     }
 
-    let softlisted = this.checkRspamdSoftlist(tnx);
+    let softlisted = this.checkRspamdSoftlist(txn);
     if (softlisted) {
         // can not send DSN object for hook_queue as it is converted to [object Object]
-        tnx.notes.rejectCode = softlisted.key;
-        return next(DENYSOFT, plugin.dsnSpamResponse(tnx, softlisted.key).reply);
+        txn.notes.rejectCode = softlisted.key;
+        return next(DENYSOFT, plugin.dsnSpamResponse(txn, softlisted.key).reply);
     }
 
     // results about verification (TLS, SPF, DKIM)
     let verificationResults = {
         tls: false,
         spf: false,
-        dkim: false
+        dkim: false,
+        arc: false,
+        bimi: false
     };
+
+    //plugin.loginfo('VALIDATION ' + util.inspect(connection.results, false, 6), plugin, connection);
 
     let tlsResults = connection.results.get('tls');
     if (tlsResults && tlsResults.enabled) {
         verificationResults.tls = tlsResults.cipher;
     }
 
-    // find domain that sent this message (SPF Pass)
-    let spfResultsFrom = tnx.results.get('spf');
-    let spfResultsHelo = tnx.results.get('spf');
-    if (spfResultsFrom && spfResultsFrom.scope === 'mfrom' && spfResultsFrom.result === 'Pass') {
-        verificationResults.spf = tools.normalizeDomain(spfResultsFrom.domain);
-    } else if (spfResultsHelo && spfResultsHelo.scope === 'helo' && spfResultsHelo.result === 'Pass') {
-        verificationResults.spf = tools.normalizeDomain(spfResultsHelo.domain);
-    }
+    plugin.loginfo(`MAILAUTH: ${util.inspect(txn.results.get('mailauth'), false, 5)}`, plugin, connection);
 
-    let envelopeFrom = tnx.notes.sender;
-    let headerFrom = plugin.getHeaderFrom(tnx);
+    plugin.loginfo(`MAILAUTH: ${util.inspect(txn.notes.mailauth, false, 10)}`, plugin, connection);
 
-    // find domain that DKIM signed this message. Prefer header from, otherwise use envelope from
-    if (tnx.notes.dkim_results) {
-        let dkimResults = Array.isArray(tnx.notes.dkim_results) ? tnx.notes.dkim_results : [].concat(tnx.notes.dkim_results || []);
+    let envelopeFrom = txn.notes.sender;
+    let headerFrom = plugin.getHeaderFrom(txn);
+
+    if (txn.notes.mailauth) {
+        // Results from the mailauth plugin
+
+        // SPF result
+        if (txn.notes.mailauth.spf?.status?.result === 'pass' && txn.notes.mailauth.spf?.domain) {
+            verificationResults.spf = txn.notes.mailauth.spf?.domain;
+        }
+
+        // DKIM result
+        // Sort signatures, prefer passing and aligned ones
+        let dkimResults = (txn.notes.mailauth.dkim?.results || []).sort((a, b) => {
+            if (a.status === 'pass' && b.status !== 'pass') {
+                return -1;
+            }
+            if (a.status !== 'pass' && b.status === 'pass') {
+                return 1;
+            }
+            if (a.status?.aligned && !b.status?.aligned) {
+                return -1;
+            }
+            if (!a.status?.aligned && b.status?.aligned) {
+                return 1;
+            }
+            if (a.status?.aligned && b.status?.aligned) {
+                return a.status?.aligned.localeCompare(b.status?.aligned);
+            }
+            return a.signingDomain.localeCompare(b.signingDomain);
+        });
+
+        if (dkimResults[0]?.status?.result === 'pass') {
+            verificationResults.dkim = dkimResults[0]?.signingDomain;
+        }
+
+        // ARC
+        if (txn.notes.mailauth.arc?.status?.result === 'pass' && txn.notes.mailauth.arc?.signature?.signingDomain) {
+            verificationResults.arc = txn.notes.mailauth.arc?.signature?.signingDomain;
+        }
+
+        // BIMI
+        if (txn.notes.mailauth.bimi?.status?.result === 'pass') {
+            verificationResults.bimi = txn.notes.mailauth.bimi;
+        }
+    } else {
+        // Results from spf and dkim_verify plugins
+
+        // find domain that sent this message (SPF Pass)
+        let spfResultsFrom = txn.results.get('spf');
+        let spfResultsHelo = txn.results.get('spf');
+        if (spfResultsFrom && spfResultsFrom.scope === 'mfrom' && spfResultsFrom.result === 'Pass') {
+            verificationResults.spf = tools.normalizeDomain(spfResultsFrom.domain);
+        } else if (spfResultsHelo && spfResultsHelo.scope === 'helo' && spfResultsHelo.result === 'Pass') {
+            verificationResults.spf = tools.normalizeDomain(spfResultsHelo.domain);
+        }
+
+        // find domain that DKIM signed this message. Prefer header from, otherwise use envelope from
+        let dkimResults = Array.isArray(txn.notes.dkim_results) ? txn.notes.dkim_results : [].concat(txn.notes.dkim_results || []);
 
         let envelopeDomain = (envelopeFrom && envelopeFrom.split('@').pop()) || '';
         let headerDomain = (headerFrom && headerFrom.address && headerFrom.address.split('@').pop()) || '';
@@ -973,12 +1032,12 @@ exports.hook_queue = function (next, connection) {
         }
     }
 
-    let messageId = (tnx.header.get('Message-Id') || '').toString();
-    let subject = (tnx.header.get('Subject') || '').toString();
+    let messageId = (txn.header.get('Message-Id') || '').toString();
+    let subject = (txn.header.get('Subject') || '').toString();
 
     let sendLogEntry = resolution => {
         if (resolution) {
-            let rspamd = tnx.results.get('rspamd');
+            let rspamd = txn.results.get('rspamd');
 
             try {
                 subject = libmime.decodeWords(subject).trim();
@@ -1001,7 +1060,7 @@ exports.hook_queue = function (next, connection) {
             if (headerFrom) {
                 message._header_from = headerFrom.address;
                 message._header_from_name = headerFrom.provided && headerFrom.provided.name;
-                message._header_from_value = tnx.header.get_all('From').join('; ');
+                message._header_from_value = txn.header.get_all('From').join('; ');
             }
 
             Object.keys(resolution).forEach(key => {
@@ -1010,7 +1069,7 @@ exports.hook_queue = function (next, connection) {
                 }
             });
 
-            message._spam_tests = this.rspamdSymbols(tnx)
+            message._spam_tests = this.rspamdSymbols(txn)
                 .map(symbol => `${symbol.key}=${symbol.score}`)
                 .join(', ');
 
@@ -1018,12 +1077,12 @@ exports.hook_queue = function (next, connection) {
         }
     };
 
-    let collector = new StreamCollect();
+    let collector = new StreamCollect({ plugin, connection });
 
     let collectData = done => {
         // buffer message chunks by draining the stream
         collector.on('data', () => false); //just drain
-        tnx.message_stream.once('error', err => collector.emit('error', err));
+        txn.message_stream.once('error', err => collector.emit('error', err));
         collector.once('end', done);
 
         collector.once('error', err => {
@@ -1034,14 +1093,14 @@ exports.hook_queue = function (next, connection) {
                 _failure: 'yes',
                 _err_code: err.code
             });
-            tnx.notes.rejectCode = 'ERRQ01';
+            txn.notes.rejectCode = 'ERRQ01';
             return next(DENYSOFT, 'Failed to queue message [ERRQ01]');
         });
 
-        tnx.message_stream.pipe(collector);
+        txn.message_stream.pipe(collector);
     };
 
-    const referencedUsers = plugin.getReferencedUsers(tnx);
+    const referencedUsers = plugin.getReferencedUsers(txn);
 
     // filter user ids that are allowed to send autoreplies
     // this way we skip sending autoreplies from forwarded addresses
@@ -1056,7 +1115,7 @@ exports.hook_queue = function (next, connection) {
             return collectData(done);
         }
 
-        let rspamd = tnx.results.get('rspamd');
+        let rspamd = txn.results.get('rspamd');
         if (rspamd && rspamd.score && plugin.rspamd.forwardSkip && rspamd.score >= plugin.rspamd.forwardSkip) {
             // do not forward spam messages
             plugin.loginfo('FORWARDSKIP score=' + JSON.stringify(rspamd.score) + ' required=' + plugin.rspamd.forwardSkip, plugin, connection);
@@ -1070,7 +1129,7 @@ exports.hook_queue = function (next, connection) {
                 _spam_allowed: plugin.rspamd.forwardSkip
             };
 
-            message._spam_tests = this.rspamdSymbols(tnx)
+            message._spam_tests = this.rspamdSymbols(txn)
                 .map(symbol => `${symbol.key}=${symbol.score}`)
                 .join(', ');
 
@@ -1089,10 +1148,10 @@ exports.hook_queue = function (next, connection) {
             false;
 
         let mail = {
-            parentId: tnx.notes.id,
+            parentId: txn.notes.id,
             reason: 'forward',
 
-            from: tnx.notes.sender,
+            from: txn.notes.sender,
             to: [],
 
             targets,
@@ -1130,7 +1189,7 @@ exports.hook_queue = function (next, connection) {
                 short_message: '[QUEUED] ' + args[0].id,
 
                 _parent_queue_id: queueId,
-                _from: tnx.notes.sender,
+                _from: txn.notes.sender,
                 _to: (targets || []).map(target => ((target && target.value) || target).toString().replace(/\?.*$/, '')).join('\n'),
 
                 _queued: 'yes',
@@ -1145,7 +1204,7 @@ exports.hook_queue = function (next, connection) {
         });
 
         if (message) {
-            tnx.message_stream.once('error', err => message.emit('error', err));
+            txn.message_stream.once('error', err => message.emit('error', err));
             message.once('error', err => {
                 plugin.logerror('QUEUEERROR Failed to retrieve message. error=' + err.message, plugin, connection);
                 sendLogEntry({
@@ -1155,12 +1214,12 @@ exports.hook_queue = function (next, connection) {
                     _failure: 'yes',
                     _err_code: err.code
                 });
-                tnx.notes.rejectCode = 'ERRQ04';
+                txn.notes.rejectCode = 'ERRQ04';
                 return next(DENYSOFT, 'Failed to queue message [ERRQ04]');
             });
 
             // pipe the message to the collector object to gather message chunks for further processing
-            tnx.message_stream.pipe(collector).pipe(message);
+            txn.message_stream.pipe(collector).pipe(message);
         }
     };
 
@@ -1195,7 +1254,7 @@ exports.hook_queue = function (next, connection) {
                         db: plugin.db,
                         queueId,
                         maildrop: plugin.maildrop,
-                        sender: tnx.notes.sender,
+                        sender: txn.notes.sender,
                         recipient: addressData.address,
                         chunks: collector.chunks,
                         chunklen: collector.chunklen,
@@ -1230,16 +1289,16 @@ exports.hook_queue = function (next, connection) {
                     _interface: 'mx'
                 });
 
-                plugin.loginfo('QUEUED AUTOREPLY target=' + tnx.notes.sender + ' queue-id=' + result.id, plugin, connection);
+                plugin.loginfo('QUEUED AUTOREPLY target=' + txn.notes.sender + ' queue-id=' + result.id, plugin, connection);
             } catch (err) {
-                plugin.lognotice('AUTOREPLY ERROR target=' + tnx.notes.sender + ' error=' + err.message, plugin, connection);
+                plugin.lognotice('AUTOREPLY ERROR target=' + txn.notes.sender + ' error=' + err.message, plugin, connection);
             }
         }
     };
 
     // update rate limit counters for all recipients
     let updateRateLimits = async () => {
-        let rateKeys = tnx.notes.rateKeys || [];
+        let rateKeys = txn.notes.rateKeys || [];
         for (let rateKey of rateKeys) {
             plugin.logdebug('Rate key. key=' + JSON.stringify(rateKey), plugin, connection);
             await plugin.updateRateLimit(plugin, connection, rateKey.selector || 'rcpt', rateKey.key, rateKey.limit);
@@ -1251,19 +1310,34 @@ exports.hook_queue = function (next, connection) {
         let prepared = false;
         let userList = Array.from(users).map(e => e[1]);
 
+        if (verificationResults.bimi) {
+            // fetch BIMI logo
+            try {
+                let bimiData = await plugin.bimiHandler.getInfo(verificationResults.bimi);
+                if (bimiData?._id) {
+                    verificationResults.bimi = bimiData?._id;
+                } else {
+                    verificationResults.bimi = false;
+                }
+            } catch (err) {
+                plugin.logerror('Failed to get BIMI logo: ' + err.stack, plugin, connection);
+                verificationResults.bimi = false;
+            }
+        }
+
         for (let rcptData of userList) {
-            let rspamd = tnx.results.get('rspamd');
+            let rspamd = txn.results.get('rspamd');
             let recipient = rcptData.recipient;
             let userData = rcptData.userData;
 
-            plugin.logdebug(plugin, 'Filtering message for ' + recipient, plugin, connection);
+            plugin.logdebug('Filtering message for ' + recipient, plugin, connection);
             try {
                 const { response, prepared: preparedResponse } = await plugin.filterHandler.storeMessage(userData, {
                     mimeTree: prepared && prepared.mimeTree,
                     maildata: prepared && prepared.maildata,
                     user: userData,
                     mailbox: rcptData.mailbox, // might be set by an additional plugin
-                    sender: tnx.notes.sender,
+                    sender: txn.notes.sender,
                     recipient,
                     chunks: collector.chunks,
                     chunklen: collector.chunklen,
@@ -1272,11 +1346,11 @@ exports.hook_queue = function (next, connection) {
                     meta: {
                         transactionId: queueId,
                         source: 'MX',
-                        from: tnx.notes.sender,
+                        from: txn.notes.sender,
                         to: [recipient],
                         origin: remoteIp,
                         transhost,
-                        transtype: tnx.notes.transmissionType,
+                        transtype: txn.notes.transmissionType,
                         spamScore: rspamd ? rspamd.score : false,
                         spamAction: rspamd ? rspamd.action : false,
                         time: new Date()
@@ -1405,7 +1479,7 @@ exports.hook_queue = function (next, connection) {
                 }
 
                 if (response.error) {
-                    tnx.notes.rejectCode = response.error.code;
+                    txn.notes.rejectCode = response.error.code;
 
                     if (response.error.code === 'DroppedByPolicy') {
                         sendLogEntry({
@@ -1495,13 +1569,13 @@ exports.hook_queue = function (next, connection) {
                     case 15: {
                         // MongoDB overflow
                         plugin.loginfo('REJECTED rcpt=' + recipient + ' error=' + err.message, plugin, connection);
-                        tnx.notes.rejectCode = 'ERRQ07';
+                        txn.notes.rejectCode = 'ERRQ07';
                         return [DENY, 'Failed to queue message, too many nested attachments [ERRQ07]'];
                     }
                     default: {
                         // might be an isse to reject if some recipients were already processed
                         plugin.loginfo('DEFERRED rcpt=' + recipient + ' error=' + err.message, plugin, connection);
-                        tnx.notes.rejectCode = 'ERRQ05';
+                        txn.notes.rejectCode = 'ERRQ05';
                         return [DENYSOFT, 'Failed to queue message [ERRQ05]'];
                     }
                 }
@@ -1534,7 +1608,7 @@ exports.hook_queue = function (next, connection) {
                         });
 
                         plugin.loginfo('DEFERRED error=' + err.message, plugin, connection);
-                        tnx.notes.rejectCode = 'ERRQ06';
+                        txn.notes.rejectCode = 'ERRQ06';
                         next(DENYSOFT, 'Failed to queue message [ERRQ06]');
                     });
             });
@@ -1597,9 +1671,9 @@ exports.updateRateLimit = async (plugin, connection, selector, key, limit) => {
     });
 };
 
-exports.getHeaderFrom = function (tnx) {
+exports.getHeaderFrom = function (txn) {
     let fromAddresses = new Map();
-    [].concat(tnx.header.get_all('From') || []).forEach(entry => {
+    [].concat(txn.header.get_all('From') || []).forEach(entry => {
         let walk = addresses => {
             addresses.forEach(address => {
                 if (address.address) {
@@ -1627,14 +1701,14 @@ exports.getHeaderFrom = function (tnx) {
 };
 
 // Filter recipients that are referenced in message headers To: or Cc fields
-exports.getReferencedUsers = function (tnx) {
-    const { users } = tnx.notes.targets;
+exports.getReferencedUsers = function (txn) {
+    const { users } = txn.notes.targets;
 
     let referencedUsers = new Set();
 
     []
-        .concat(tnx.header.get_all('To') || [])
-        .concat(tnx.header.get_all('Cc') || [])
+        .concat(txn.header.get_all('To') || [])
+        .concat(txn.header.get_all('Cc') || [])
         .forEach(entry => {
             let walk = addresses => {
                 addresses.forEach(address => {
@@ -1656,8 +1730,8 @@ exports.getReferencedUsers = function (tnx) {
     return referencedUsers;
 };
 
-exports.rspamdSymbols = function (tnx) {
-    let rspamd = tnx.results.get('rspamd');
+exports.rspamdSymbols = function (txn) {
+    let rspamd = txn.results.get('rspamd');
     let symbols = (rspamd && rspamd.symbols) || rspamd;
 
     let result = [];
@@ -1685,9 +1759,9 @@ exports.rspamdSymbols = function (tnx) {
     return result;
 };
 
-exports.checkRspamdBlacklist = function (tnx) {
+exports.checkRspamdBlacklist = function (txn) {
     const plugin = this;
-    let rspamd = tnx.results.get('rspamd');
+    let rspamd = txn.results.get('rspamd');
     let symbols = (rspamd && rspamd.symbols) || rspamd;
 
     if (!symbols) {
@@ -1713,9 +1787,9 @@ exports.checkRspamdBlacklist = function (tnx) {
     return false;
 };
 
-exports.checkRspamdSoftlist = function (tnx) {
+exports.checkRspamdSoftlist = function (txn) {
     const plugin = this;
-    let rspamd = tnx.results.get('rspamd');
+    let rspamd = txn.results.get('rspamd');
     let symbols = (rspamd && rspamd.symbols) || rspamd;
 
     if (!symbols) {
@@ -1741,7 +1815,7 @@ exports.checkRspamdSoftlist = function (tnx) {
     return false;
 };
 
-exports.dsnSpamResponse = function (tnx, key) {
+exports.dsnSpamResponse = function (txn, key) {
     const plugin = this;
     let message = plugin.rspamd.responses[key] || defaultSpamRejectMessage;
 
@@ -1750,7 +1824,7 @@ exports.dsnSpamResponse = function (tnx, key) {
         if (domain) {
             return domain;
         }
-        let headerFrom = plugin.getHeaderFrom(tnx) || tnx.notes.sender || '';
+        let headerFrom = plugin.getHeaderFrom(txn) || txn.notes.sender || '';
         domain = (headerFrom && headerFrom.address && headerFrom.address.split('@').pop()) || '-';
         return domain;
     });
