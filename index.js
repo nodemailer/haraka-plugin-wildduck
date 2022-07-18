@@ -936,16 +936,10 @@ exports.hook_queue = function (next, connection) {
         bimi: false
     };
 
-    //plugin.loginfo('VALIDATION ' + util.inspect(connection.results, false, 6), plugin, connection);
-
     let tlsResults = connection.results.get('tls');
     if (tlsResults && tlsResults.enabled) {
         verificationResults.tls = tlsResults.cipher;
     }
-
-    plugin.loginfo(`MAILAUTH: ${util.inspect(txn.results.get('mailauth'), false, 5)}`, plugin, connection);
-
-    plugin.loginfo(`MAILAUTH: ${util.inspect(txn.notes.mailauth, false, 10)}`, plugin, connection);
 
     let envelopeFrom = txn.notes.sender;
     let headerFrom = plugin.getHeaderFrom(txn);
