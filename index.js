@@ -7,9 +7,10 @@
 process.env.DISABLE_WILD_CONFIG = 'true';
 
 const os = require('os');
-const ObjectId = require('mongodb').ObjectId;
 const db = require('./lib/db');
 const DSN = require('haraka-dsn');
+const dns = require('dns');
+const { PassThrough } = require('stream');
 const punycode = require('punycode/');
 const SRS = require('srs.js');
 const counters = require('wildduck/lib/counters');
@@ -23,6 +24,8 @@ const wdErrors = require('wildduck/lib/errors');
 const Gelf = require('gelf');
 const addressparser = require('nodemailer/lib/addressparser');
 const libmime = require('libmime');
+
+const { mail: hookMail, dataPost: hookDataPost } = require('./lib/hooks');
 
 DSN.rcpt_too_fast = () =>
     DSN.create(
@@ -42,6 +45,8 @@ exports.register = function () {
 
     plugin.register_hook('init_master', 'init_wildduck_shared');
     plugin.register_hook('init_child', 'init_wildduck_shared');
+
+    plugin.resolver = async (name, rr) => await dns.promises.resolve(name, rr);
 };
 
 exports.load_wildduck_ini = function () {
@@ -263,47 +268,16 @@ exports.hook_deny = function (next, connection, params) {
 
 exports.hook_mail = function (next, connection, params) {
     const plugin = this;
-    const txn = connection.transaction;
-
-    let from = params[0];
-    txn.notes.sender = from.address();
-
-    txn.notes.id = new ObjectId();
-    txn.notes.rateKeys = [];
-    txn.notes.targets = {
-        users: new Map(),
-        forwards: new Map(),
-        recipients: new Set(),
-        autoreplies: new Map()
-    };
-
-    txn.notes.transmissionType = []
-        .concat(connection.greeting === 'EHLO' ? 'E' : [])
-        .concat('SMTP')
-        .concat(connection.tls_cipher ? 'S' : [])
-        .join('');
-
-    plugin.loggelf({
-        short_message: '[MAIL FROM:' + txn.notes.sender + '] ' + txn.uuid,
-
-        _mail_action: 'mail_from',
-        _from: txn.notes.sender,
-        _queue_id: txn.uuid,
-        _ip: connection.remote_ip,
-        _proto: txn.notes.transmissionType
-    });
-
-    plugin.db.settingsHandler
-        .getMulti(['const:max:storage', 'const:max:recipients', 'const:max:forwards'])
-        .then(settings => {
-            txn.notes.settings = settings;
+    hookMail(plugin, connection, params)
+        .then(() => {
             next();
         })
-        .catch(err => {
-            plugin.logerror(err, plugin, connection);
-            txn.notes.rejectCode = 'ERRC04';
-            return next(DENYSOFT, 'Failed to process address, try again [ERRC04]');
-        });
+        .catch(err => next(err.smtpAction || DENYSOFT, err.message));
+};
+
+exports.hook_data_post = function (next, connection) {
+    const plugin = this;
+    return hookDataPost(next, plugin, connection);
 };
 
 exports.hook_rcpt = function (next, connection, params) {
@@ -943,86 +917,44 @@ exports.hook_queue = function (next, connection) {
     let envelopeFrom = txn.notes.sender;
     let headerFrom = plugin.getHeaderFrom(txn);
 
-    if (txn.notes.mailauth) {
-        // Results from the mailauth plugin
+    // SPF result
+    if (txn.notes.spfResult?.status?.result === 'pass' && txn.notes.spfResult?.domain) {
+        verificationResults.spf = txn.notes.spfResult?.domain;
+    }
 
-        // SPF result
-        if (txn.notes.mailauth.spf?.status?.result === 'pass' && txn.notes.mailauth.spf?.domain) {
-            verificationResults.spf = txn.notes.mailauth.spf?.domain;
+    // DKIM result
+    // Sort signatures, prefer passing and aligned ones
+    let dkimResults = (txn.notes.dkimResult?.results || []).sort((a, b) => {
+        if (a.status === 'pass' && b.status !== 'pass') {
+            return -1;
         }
-
-        // DKIM result
-        // Sort signatures, prefer passing and aligned ones
-        let dkimResults = (txn.notes.mailauth.dkim?.results || []).sort((a, b) => {
-            if (a.status === 'pass' && b.status !== 'pass') {
-                return -1;
-            }
-            if (a.status !== 'pass' && b.status === 'pass') {
-                return 1;
-            }
-            if (a.status?.aligned && !b.status?.aligned) {
-                return -1;
-            }
-            if (!a.status?.aligned && b.status?.aligned) {
-                return 1;
-            }
-            if (a.status?.aligned && b.status?.aligned) {
-                return a.status?.aligned.localeCompare(b.status?.aligned);
-            }
-            return a.signingDomain.localeCompare(b.signingDomain);
-        });
-
-        if (dkimResults[0]?.status?.result === 'pass') {
-            verificationResults.dkim = dkimResults[0]?.signingDomain;
+        if (a.status !== 'pass' && b.status === 'pass') {
+            return 1;
         }
-
-        // ARC
-        if (txn.notes.mailauth.arc?.status?.result === 'pass' && txn.notes.mailauth.arc?.signature?.signingDomain) {
-            verificationResults.arc = txn.notes.mailauth.arc?.signature?.signingDomain;
+        if (a.status?.aligned && !b.status?.aligned) {
+            return -1;
         }
-
-        // BIMI
-        if (txn.notes.mailauth.bimi?.status?.result === 'pass') {
-            verificationResults.bimi = txn.notes.mailauth.bimi;
+        if (!a.status?.aligned && b.status?.aligned) {
+            return 1;
         }
-    } else {
-        // Results from spf and dkim_verify plugins
-
-        // find domain that sent this message (SPF Pass)
-        let spfResultsFrom = txn.results.get('spf');
-        let spfResultsHelo = txn.results.get('spf');
-        if (spfResultsFrom && spfResultsFrom.scope === 'mfrom' && spfResultsFrom.result === 'Pass') {
-            verificationResults.spf = tools.normalizeDomain(spfResultsFrom.domain);
-        } else if (spfResultsHelo && spfResultsHelo.scope === 'helo' && spfResultsHelo.result === 'Pass') {
-            verificationResults.spf = tools.normalizeDomain(spfResultsHelo.domain);
+        if (a.status?.aligned && b.status?.aligned) {
+            return a.status?.aligned.localeCompare(b.status?.aligned);
         }
+        return a.signingDomain.localeCompare(b.signingDomain);
+    });
 
-        // find domain that DKIM signed this message. Prefer header from, otherwise use envelope from
-        let dkimResults = Array.isArray(txn.notes.dkim_results) ? txn.notes.dkim_results : [].concat(txn.notes.dkim_results || []);
+    if (dkimResults[0]?.status?.result === 'pass') {
+        verificationResults.dkim = dkimResults[0]?.signingDomain;
+    }
 
-        let envelopeDomain = (envelopeFrom && envelopeFrom.split('@').pop()) || '';
-        let headerDomain = (headerFrom && headerFrom.address && headerFrom.address.split('@').pop()) || '';
+    // ARC
+    if (txn.notes.arcResult?.status?.result === 'pass' && txn.notes.arcResult?.signature?.signingDomain) {
+        verificationResults.arc = txn.notes.arcResult?.signature?.signingDomain;
+    }
 
-        for (let dkimResult of dkimResults) {
-            if (dkimResult && dkimResult.result === 'pass') {
-                let domain = tools.normalizeDomain(dkimResult.domain);
-
-                if (headerDomain && domain === headerDomain) {
-                    verificationResults.dkim = headerDomain;
-                    break;
-                }
-
-                if (envelopeDomain && domain === envelopeDomain) {
-                    verificationResults.dkim = envelopeDomain;
-                    // do not break yet, maybe header domain result also exists
-                }
-            }
-        }
-
-        // no mathcing domain found, use the first valid one
-        if (!verificationResults.dkim && dkimResults.length) {
-            verificationResults.dkim = dkimResults[0].domain;
-        }
+    // BIMI
+    if (txn.notes.bimiResult?.status?.result === 'pass') {
+        verificationResults.bimi = txn.notes.bimiResult;
     }
 
     let messageId = (txn.header.get('Message-Id') || '').toString();
@@ -1626,7 +1558,7 @@ exports.checkRateLimit = function (connection, selector, key, limit, next) {
         }
 
         if (!result.success) {
-            connection.lognotice(
+            plugin.lognotice(
                 'RATELIMITED key=' + key + ' selector=' + selector + ' limit=' + limit + ' value=' + result.value + ' ttl=' + result.ttl,
                 plugin,
                 connection
@@ -1653,7 +1585,7 @@ exports.updateRateLimit = async (plugin, connection, selector, key, limit) => {
                 return reject(err);
             }
 
-            connection.logdebug(
+            plugin.logdebug(
                 'Rate limit key=' + key + ' selector=' + selector + ' limit=' + limit + ' value=' + result.value + ' ttl=' + result.ttl,
                 plugin,
                 connection

@@ -91,3 +91,12 @@ rspamd:
     responses:
         DMARC_POLICY_REJECT: "Unauthenticated email from {host} is not accepted due to domain's DMARC policy"
         RBL_ZONE: '[{host}] was found from Zone RBL'
+
+auth:
+    dns:
+        # How many DNS lookups to perform for SPF until considering the validation as failed
+        # Probably should be 10 instead
+        maxLookups: 50
+
+    # If a public key has fewer bits than required, then DKIM and ARC keys are considered failing by policy
+    minBitLength: 1024
