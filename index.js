@@ -23,7 +23,6 @@ const wdErrors = require('wildduck/lib/errors');
 const Gelf = require('gelf');
 const addressparser = require('nodemailer/lib/addressparser');
 const libmime = require('libmime');
-const util = require('util');
 
 DSN.rcpt_too_fast = () =>
     DSN.create(
