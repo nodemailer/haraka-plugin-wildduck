@@ -10,7 +10,6 @@ const os = require('os');
 const db = require('./lib/db');
 const DSN = require('haraka-dsn');
 const dns = require('dns');
-const { PassThrough } = require('stream');
 const punycode = require('punycode/');
 const SRS = require('srs.js');
 const counters = require('wildduck/lib/counters');
