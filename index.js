@@ -10,7 +10,6 @@ const os = require('os');
 const db = require('./lib/db');
 const DSN = require('haraka-dsn');
 const dns = require('dns');
-const { PassThrough } = require('stream');
 const punycode = require('punycode/');
 const SRS = require('srs.js');
 const counters = require('wildduck/lib/counters');
@@ -259,6 +258,55 @@ exports.hook_deny = function (next, connection, params) {
                 }
             });
         }
+
+        plugin.loggelf(logdata);
+    }
+
+    next();
+};
+
+exports.hook_max_data_exceeded = function (next, connection) {
+    const plugin = this;
+
+    const txn = connection.transaction;
+    let remoteIp = connection.remote_ip;
+
+    if (txn === null) {
+        next();
+        return;
+    }
+
+    let rcpts = txn.rcpt_to || [];
+    if (!rcpts.length) {
+        rcpts = [false];
+    }
+
+    for (let rcpt of rcpts) {
+        let user;
+        let address = (rcpt && rcpt.address()) || false;
+
+        if (txn.notes.targets && txn.notes.targets.users) {
+            // try to resolve user id for the recipient address
+            for (let target of txn.notes.targets.users) {
+                let uid = target[0];
+                let info = target[1];
+                if (info && info.recipient === address) {
+                    user = uid;
+                }
+            }
+        }
+
+        let logdata = {
+            short_message: '[DENY:' + txn.notes.sender + '] ' + txn.uuid,
+            _mail_action: 'deny',
+            _from: txn.notes.sender,
+            _queue_id: txn.uuid,
+            _ip: remoteIp,
+            _proto: txn.notes.transmissionType,
+            _to: address,
+            _user: user,
+            _reject_code: 'max_data_exceeded'
+        };
 
         plugin.loggelf(logdata);
     }
