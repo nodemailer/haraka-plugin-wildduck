@@ -206,9 +206,20 @@ exports.hook_deny = function (next, connection, params) {
         return;
     }
 
-    let rcpts = txn.rcpt_to || [];
-    if (!rcpts.length) {
-        rcpts = [false];
+    let [, , , , denyParams, denyHook] = params;
+
+    let rcpts;
+    switch (denyHook) {
+        case 'rcpt':
+            // only a single recipient failed
+            rcpts = [].concat((denyParams && denyParams[0]) || false);
+            break;
+        default:
+            // all recipients failed
+            rcpts = txn.rcpt_to || [];
+            if (!rcpts.length) {
+                rcpts = [false];
+            }
     }
 
     for (let rcpt of rcpts) {
