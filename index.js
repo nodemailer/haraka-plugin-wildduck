@@ -209,7 +209,7 @@ exports.increment_forward_counters = async function (connection) {
     for (let [key, { increment, limit }] of txn.notes.forwardCounters.entries()) {
         try {
             let ttlres = await plugin.ttlcounterAsync('wdf:' + key, increment, limit, false);
-            plugin.loginfo(`Roward counter updated for ${key} (${increment}/${limit}): ${JSON.stringify(ttlres)}`, plugin, connection);
+            plugin.loginfo(`Forward counter updated for ${key} (${increment}/${limit}): ${JSON.stringify(ttlres)}`, plugin, connection);
         } catch (err) {
             plugin.logerror(err, plugin, connection);
         }
