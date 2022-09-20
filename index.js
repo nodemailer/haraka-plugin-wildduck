@@ -23,6 +23,7 @@ const wdErrors = require('wildduck/lib/errors');
 const Gelf = require('gelf');
 const addressparser = require('nodemailer/lib/addressparser');
 const libmime = require('libmime');
+const { promisify } = require('util');
 
 const { mail: hookMail, dataPost: hookDataPost } = require('./lib/hooks');
 
@@ -121,6 +122,7 @@ exports.open_database = function (server, next) {
             }
             plugin.db = db;
             plugin.ttlcounter = counters(db.redis).ttlcounter;
+            plugin.ttlcounterAsync = promisify(plugin.ttlcounter);
 
             plugin.db.messageHandler.loggelf = message => plugin.loggelf(message);
             plugin.db.userHandler.loggelf = message => plugin.loggelf(message);
@@ -194,6 +196,166 @@ exports.init_wildduck_shared = function (next, server) {
     const plugin = this;
 
     plugin.open_database(server, next);
+};
+
+exports.increment_forward_counters = async function (connection) {
+    const plugin = this;
+    const txn = connection.transaction;
+
+    if (!txn || !txn.notes || !txn.notes.targets || !txn.notes.targets.forwardCounters) {
+        return false;
+    }
+
+    const { forwardCounters } = txn.notes.targets;
+
+    for (let [key, { increment, limit }] of forwardCounters.entries()) {
+        try {
+            let ttlres = await plugin.ttlcounterAsync('wdf:' + key, increment, limit, false);
+            plugin.loginfo(`Forward counter updated for ${key} (${increment}/${limit}): ${JSON.stringify(ttlres)}`, plugin, connection);
+        } catch (err) {
+            plugin.logerror(err, plugin, connection);
+        }
+    }
+};
+
+exports.handle_forwarding_address = async function (connection, address, addressData) {
+    const plugin = this;
+    const txn = connection.transaction;
+
+    if (!txn || !txn.notes || !txn.notes.targets || !txn.notes.targets.forwardCounters) {
+        plugin.logerror('Empty transaction, can not forward', plugin, connection);
+        return false;
+    }
+
+    const { forwards, autoreplies, users, forwardCounters } = txn.notes.targets;
+
+    const forwardLimit = addressData.forwards || txn.notes.settings['const:max:forwards'];
+
+    let limitResult;
+    try {
+        limitResult = await plugin.ttlcounterAsync(
+            'wdf:' + addressData._id.toString(),
+            0, //addressData.targets.length,
+            forwardLimit,
+            false
+        );
+    } catch (err) {
+        // failed checks
+        err.resolution = {
+            full_message: err.stack,
+            _forward: 'yes',
+            _rate_limit: 'yes',
+            _selector: 'user',
+
+            _failure: 'yes',
+            _error: 'rate limit check failed',
+            _err_code: err.code
+        };
+        err.code = err.code || 'RateLimit';
+        throw err;
+    }
+
+    if (!limitResult.success) {
+        connection.lognotice(
+            'RATELIMITED target=' +
+                addressData.address +
+                ' key=' +
+                addressData._id +
+                ' limit=' +
+                addressData.forwards +
+                ' value=' +
+                limitResult.value +
+                ' ttl=' +
+                limitResult.ttl,
+            plugin,
+            connection
+        );
+
+        let error = new Error('Rate limit hit');
+        error.resolution = {
+            _forward: 'yes',
+            _rate_limit: 'yes',
+            _selector: 'user',
+            _error: 'too many attempts'
+        };
+        txn.notes.rejectCode = 'RATE_LIMIT';
+
+        error.responseAction = DENY;
+        error.responseMessage = DSN.rcpt_too_fast();
+        throw error;
+    }
+
+    if (addressData.forwardedDisabled) {
+        // forwarded address is disabled for whatever reason'
+        let error = new Error('Mailbox disabled');
+
+        error.resolution = {
+            _address: addressData._id.toString(),
+            _error: 'disabled forwarded address',
+            _disabled_forwarded: 'yes'
+        };
+        txn.notes.rejectCode = 'MBOX_DISABLED';
+
+        error.responseAction = DENY;
+        error.responseMessage = DSN.mbox_disabled();
+        throw error;
+    }
+
+    plugin.loginfo(
+        'FORWARDING rcpt=' +
+            address +
+            ' address=' +
+            addressData.address +
+            '[' +
+            addressData._id +
+            ']' +
+            ' target=' +
+            addressData.targets.map(target => ((target && target.value) || target).toString().replace(/\?.*$/, '')).join(', '),
+        plugin,
+        connection
+    );
+
+    if (addressData.autoreply) {
+        autoreplies.set(addressData.addrview, addressData);
+    }
+
+    let forwardTargets = [];
+    for (let targetData of addressData.targets) {
+        if (targetData.type === 'relay') {
+            // relay is not rate limited
+            targetData.recipient = addressData.address || address;
+
+            // Do not use `targetData.value` alone as it might be the same for multiple recipients
+            forwards.set(`${targetData.recipient}:${targetData.value}`, targetData);
+
+            forwardTargets.push(targetData.recipient + ':' + (targetData.value || '').toString().replace(/\?.*$/, ''));
+            continue;
+        } else {
+            if (targetData.type !== 'mail') {
+                forwardTargets.push(address + ':' + targetData.value);
+                targetData.recipient = address;
+            } else {
+                forwardTargets.push(targetData.value);
+            }
+
+            forwards.set(targetData.value, targetData);
+            continue;
+        }
+    }
+
+    forwardCounters.set(addressData._id.toString(), {
+        increment: forwardTargets.length,
+        limit: forwardLimit
+    });
+
+    txn.notes.rejectCode = false;
+    return {
+        resolution: {
+            _forward: 'yes',
+            _rcpt_accepted: 'yes',
+            _forward_to: forwardTargets.join('\n') || 'empty_list'
+        }
+    };
 };
 
 exports.hook_deny = function (next, connection, params) {
@@ -407,7 +569,7 @@ exports.real_rcpt_handler = function (next, connection, params) {
     const txn = connection.transaction;
     const remoteIp = connection.remote_ip;
 
-    const { recipients, forwards, autoreplies, users } = txn.notes.targets;
+    const { recipients, forwards, users } = txn.notes.targets;
 
     let rcpt = params[0];
     if (/\*/.test(rcpt.user)) {
@@ -527,205 +689,6 @@ exports.real_rcpt_handler = function (next, connection, params) {
         }
     }
 
-    let handleForwardingAddress = addressData => {
-        plugin.ttlcounter(
-            'wdf:' + addressData._id.toString(),
-            addressData.targets.length,
-            addressData.forwards || txn.notes.settings['const:max:forwards'],
-            false,
-            (err, result) => {
-                if (err) {
-                    // failed checks
-                    resolution = {
-                        full_message: err.stack,
-                        _forward: 'yes',
-                        _rate_limit: 'yes',
-                        _selector: 'user',
-
-                        _failure: 'yes',
-                        _error: 'rate limit check failed',
-                        _err_code: err.code
-                    };
-                    err.code = err.code || 'RateLimit';
-                    return hookDone(err);
-                } else if (!result.success) {
-                    connection.lognotice(
-                        'RATELIMITED target=' +
-                            addressData.address +
-                            ' key=' +
-                            addressData._id +
-                            ' limit=' +
-                            addressData.forwards +
-                            ' value=' +
-                            result.value +
-                            ' ttl=' +
-                            result.ttl,
-                        plugin,
-                        connection
-                    );
-
-                    resolution = {
-                        _forward: 'yes',
-                        _rate_limit: 'yes',
-                        _selector: 'user',
-                        _error: 'too many attempts'
-                    };
-                    txn.notes.rejectCode = 'RATE_LIMIT';
-                    return hookDone(DENYSOFT, DSN.rcpt_too_fast());
-                }
-
-                if (addressData.forwardedDisabled) {
-                    // forwarded address is disabled for whatever reason
-                    resolution = {
-                        _address: addressData._id.toString(),
-                        _error: 'disabled forwarded address',
-                        _disabled_forwarded: 'yes'
-                    };
-                    txn.notes.rejectCode = 'MBOX_DISABLED';
-                    return hookDone(DENY, DSN.mbox_disabled());
-                }
-
-                plugin.loginfo(
-                    'FORWARDING rcpt=' +
-                        address +
-                        ' address=' +
-                        addressData.address +
-                        '[' +
-                        addressData._id +
-                        ']' +
-                        ' target=' +
-                        addressData.targets.map(target => ((target && target.value) || target).toString().replace(/\?.*$/, '')).join(','),
-                    plugin,
-                    connection
-                );
-
-                if (addressData.autoreply) {
-                    autoreplies.set(addressData.addrview, addressData);
-                }
-
-                let forwardTargets = [];
-                let pos = 0;
-                let processTarget = () => {
-                    if (pos >= addressData.targets.length) {
-                        resolution = {
-                            _forward: 'yes',
-                            _rcpt_accepted: 'yes',
-                            _forward_to: forwardTargets.join('\n') || 'empty_list'
-                        };
-                        txn.notes.rejectCode = false;
-                        return hookDone(OK);
-                    }
-
-                    let targetData = addressData.targets[pos++];
-
-                    if (targetData.type === 'relay') {
-                        // relay is not rate limited
-                        targetData.recipient = addressData.address || rcpt.address();
-
-                        // Do not use `targetData.value` alone as it might be the same for multiple recipients
-                        forwards.set(`${targetData.recipient}:${targetData.value}`, targetData);
-
-                        forwardTargets.push(targetData.recipient + ':' + (targetData.value || '').toString().replace(/\?.*$/, ''));
-                        return setImmediate(processTarget);
-                    }
-
-                    if (targetData.type === 'http' || (targetData.type === 'mail' && !targetData.user)) {
-                        if (targetData.type !== 'mail') {
-                            forwardTargets.push(rcpt.address() + ':' + targetData.value);
-                            targetData.recipient = rcpt.address();
-                        } else {
-                            forwardTargets.push(targetData.value);
-                        }
-
-                        forwards.set(targetData.value, targetData);
-                        return setImmediate(processTarget);
-                    }
-
-                    if (targetData.type !== 'mail') {
-                        // no idea what to do here, some new feature probably
-                        return setImmediate(processTarget);
-                    }
-
-                    if (targetData.user && users.has(targetData.user.toString())) {
-                        // already listed as a recipient
-                        return setImmediate(processTarget);
-                    }
-
-                    // we have a target user, so we need to resolve user data
-                    plugin.db.users.collection('users').findOne(
-                        { _id: targetData.user },
-                        {
-                            // extra fields are needed later in the filtering step
-                            projection: {
-                                _id: true,
-                                name: true,
-                                address: true,
-                                forwards: true,
-                                targets: true,
-                                autoreply: true,
-                                encryptMessages: true,
-                                encryptForwarded: true,
-                                pubKey: true,
-                                spamLevel: true,
-                                storageUsed: true,
-                                quota: true,
-                                tagsview: true
-                            }
-                        },
-                        (err, userData) => {
-                            if (err) {
-                                err.code = 'InternalDatabaseError';
-                                resolution = {
-                                    full_message: err.stack,
-                                    _collection: 'users',
-                                    _db_query: '_id:' + targetData.user,
-
-                                    _error: 'failed to make a db query',
-                                    _failure: 'yes',
-                                    _err_code: err.code
-                                };
-                                return hookDone(err);
-                            }
-
-                            if (!userData) {
-                                // unknown user, treat as normal forward
-                                targetData.recipient = rcpt.address();
-                                forwards.set(targetData.value, targetData);
-                                forwardTargets.push(targetData.value);
-                                return setImmediate(processTarget);
-                            }
-
-                            if (userData.disabled) {
-                                // disabled user, skip
-                                forwardTargets.push(targetData.value + ':' + userData._id + '[disabled]');
-                                return setImmediate(processTarget);
-                            }
-
-                            // max quota for the user
-                            let quota = userData.quota || txn.notes.settings['const:max:storage'];
-                            if (userData.storageUsed && quota <= userData.storageUsed) {
-                                // can not deliver mail to this user, over quota, skip
-                                forwardTargets.push(targetData.value + ':' + userData._id + '[over_quota]');
-                                return setImmediate(processTarget);
-                            }
-
-                            users.set(userData._id.toString(), {
-                                userData,
-                                recipient: rcpt.address()
-                            });
-
-                            forwardTargets.push(targetData.value + ':' + userData._id);
-
-                            setImmediate(processTarget);
-                        }
-                    );
-                };
-
-                setImmediate(processTarget);
-            }
-        );
-    };
-
     let checkIpRateLimit = (userData, done) => {
         if (!remoteIp) {
             return done();
@@ -799,7 +762,24 @@ exports.real_rcpt_handler = function (next, connection, params) {
             }
 
             if (addressData && addressData.targets) {
-                return handleForwardingAddress(addressData);
+                return plugin
+                    .handle_forwarding_address(connection, address, addressData)
+                    .then(result => {
+                        if (result && result.resolution) {
+                            resolution = result.resolution;
+                        }
+                        hookDone(OK);
+                    })
+                    .catch(err => {
+                        if (err.resolution) {
+                            resolution = err.resolution;
+                        }
+                        if (err.responseAction) {
+                            return hookDone(err.responseAction, err.responseMessage || err);
+                        } else {
+                            return hookDone(err);
+                        }
+                    });
             }
 
             if (!addressData || !addressData.user) {
@@ -1164,7 +1144,7 @@ exports.hook_queue = function (next, connection) {
                 short_message: '[Queued forward] ' + queueId,
                 _mail_action: 'forward',
                 _target_queue_id: args[0].id,
-                _target_address: (targets || []).map(target => ((target && target.value) || target).toString().replace(/\?.*$/, '')).join('\n')
+                _target_address: targets.map(target => ((target && target.value) || target).toString().replace(/\?.*$/, '')).join('\n')
             });
 
             plugin.loggelf({
@@ -1174,7 +1154,7 @@ exports.hook_queue = function (next, connection) {
 
                 _parent_queue_id: queueId,
                 _from: txn.notes.sender,
-                _to: (targets || []).map(target => ((target && target.value) || target).toString().replace(/\?.*$/, '')).join('\n'),
+                _to: targets.map(target => ((target && target.value) || target).toString().replace(/\?.*$/, '')).join('\n'),
 
                 _queued: 'yes',
                 _forwarded: 'yes',
@@ -1184,7 +1164,17 @@ exports.hook_queue = function (next, connection) {
 
             plugin.loginfo('QUEUED FORWARD queue-id=' + args[0].id, plugin, connection);
 
-            done(err, args && args[0] && args[0].id);
+            let next = () => done(err, args && args[0] && args[0].id);
+            if (txn.notes.targets && txn.notes.targets.forwardCounters) {
+                return plugin
+                    .increment_forward_counters(connection)
+                    .then(next)
+                    .catch(err => {
+                        plugin.logerror(err, plugin, connection);
+                        next();
+                    });
+            }
+            next();
         });
 
         if (message) {
