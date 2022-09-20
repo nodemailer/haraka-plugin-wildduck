@@ -202,11 +202,13 @@ exports.increment_forward_counters = async function (connection) {
     const plugin = this;
     const txn = connection.transaction;
 
-    if (!txn || !txn.notes || !txn.notes.forwardCounters) {
+    if (!txn || !txn.notes || !txn.notes.targets || !txn.notes.targets.forwardCounters) {
         return false;
     }
 
-    for (let [key, { increment, limit }] of txn.notes.forwardCounters.entries()) {
+    const { forwardCounters } = txn.notes.targets;
+
+    for (let [key, { increment, limit }] of forwardCounters.entries()) {
         try {
             let ttlres = await plugin.ttlcounterAsync('wdf:' + key, increment, limit, false);
             plugin.loginfo(`Forward counter updated for ${key} (${increment}/${limit}): ${JSON.stringify(ttlres)}`, plugin, connection);
@@ -220,9 +222,11 @@ exports.handle_forwarding_address = async function (connection, address, address
     const plugin = this;
     const txn = connection.transaction;
 
-    if (!txn || !txn.notes || !txn.notes.forwardCounters) {
+    if (!txn || !txn.notes || !txn.notes.targets || !txn.notes.targets.forwardCounters) {
+        plugin.logerror('Empty transaction, can not forward', plugin, connection);
         return false;
     }
+
     const { forwards, autoreplies, users, forwardCounters } = txn.notes.targets;
 
     const forwardLimit = addressData.forwards || txn.notes.settings['const:max:forwards'];
@@ -306,7 +310,7 @@ exports.handle_forwarding_address = async function (connection, address, address
             addressData._id +
             ']' +
             ' target=' +
-            addressData.targets.map(target => ((target && target.value) || target).toString().replace(/\?.*$/, '')).join(','),
+            addressData.targets.map(target => ((target && target.value) || target).toString().replace(/\?.*$/, '')).join(', '),
         plugin,
         connection
     );
@@ -326,9 +330,7 @@ exports.handle_forwarding_address = async function (connection, address, address
 
             forwardTargets.push(targetData.recipient + ':' + (targetData.value || '').toString().replace(/\?.*$/, ''));
             continue;
-        }
-
-        if (targetData.type === 'http' || (targetData.type === 'mail' && !targetData.user)) {
+        } else {
             if (targetData.type !== 'mail') {
                 forwardTargets.push(address + ':' + targetData.value);
                 targetData.recipient = address;
@@ -339,84 +341,6 @@ exports.handle_forwarding_address = async function (connection, address, address
             forwards.set(targetData.value, targetData);
             continue;
         }
-
-        if (targetData.type !== 'mail') {
-            // no idea what to do here, some new feature probably
-            continue;
-        }
-
-        if (targetData.user && users.has(targetData.user.toString())) {
-            // already listed as a recipient
-            continue;
-        }
-
-        let userData;
-
-        try {
-            // we have a target user, so we need to resolve user data
-            userData = await plugin.db.users.collection('users').findOne(
-                { _id: targetData.user },
-                {
-                    // extra fields are needed later in the filtering step
-                    projection: {
-                        _id: true,
-                        name: true,
-                        address: true,
-                        forwards: true,
-                        targets: true,
-                        autoreply: true,
-                        encryptMessages: true,
-                        encryptForwarded: true,
-                        pubKey: true,
-                        spamLevel: true,
-                        storageUsed: true,
-                        quota: true,
-                        tagsview: true
-                    }
-                }
-            );
-        } catch (err) {
-            err.code = 'InternalDatabaseError';
-            err.resolution = {
-                full_message: err.stack,
-                _collection: 'users',
-                _db_query: '_id:' + targetData.user,
-
-                _error: 'failed to make a db query',
-                _failure: 'yes',
-                _err_code: err.code
-            };
-            throw err;
-        }
-
-        if (!userData) {
-            // unknown user, treat as normal forward
-            targetData.recipient = address;
-            forwards.set(targetData.value, targetData);
-            forwardTargets.push(targetData.value);
-            continue;
-        }
-
-        if (userData.disabled) {
-            // disabled user, skip
-            forwardTargets.push(targetData.value + ':' + userData._id + '[disabled]');
-            continue;
-        }
-
-        // max quota for the user
-        let quota = userData.quota || txn.notes.settings['const:max:storage'];
-        if (userData.storageUsed && quota <= userData.storageUsed) {
-            // can not deliver mail to this user, over quota, skip
-            forwardTargets.push(targetData.value + ':' + userData._id + '[over_quota]');
-            continue;
-        }
-
-        users.set(userData._id.toString(), {
-            userData,
-            recipient: address
-        });
-
-        forwardTargets.push(targetData.value + ':' + userData._id);
     }
 
     forwardCounters.set(addressData._id.toString(), {
@@ -838,7 +762,7 @@ exports.real_rcpt_handler = function (next, connection, params) {
             }
 
             if (addressData && addressData.targets) {
-                plugin
+                return plugin
                     .handle_forwarding_address(connection, address, addressData)
                     .then(result => {
                         if (result && result.resolution) {
@@ -1241,7 +1165,7 @@ exports.hook_queue = function (next, connection) {
             plugin.loginfo('QUEUED FORWARD queue-id=' + args[0].id, plugin, connection);
 
             let next = () => done(err, args && args[0] && args[0].id);
-            if (txn.notes.forwardCounters) {
+            if (txn.notes.targets && txn.notes.targets.forwardCounters) {
                 return plugin
                     .increment_forward_counters(connection)
                     .then(next)
