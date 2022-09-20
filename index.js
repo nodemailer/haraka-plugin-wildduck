@@ -105,6 +105,7 @@ exports.open_database = function (server, next) {
         message.host = plugin.hostname;
         message.timestamp = Date.now() / 1000;
         message._component = component;
+        message._interface = message._interface || 'mx';
 
         Object.keys(message).forEach(key => {
             if (!message[key]) {
@@ -1286,16 +1287,46 @@ exports.hook_queue = function (next, connection) {
 
         if (verificationResults.bimi) {
             // fetch BIMI logo
+            let bimiResolution = {
+                short_message: `[BIMI] ${verificationResults.bimi.status?.header?.d}`,
+                _queue_id: queueId,
+                _bimi_domain: verificationResults.bimi.status?.header?.d
+            };
+
             try {
                 let bimiData = await plugin.bimiHandler.getInfo(verificationResults.bimi);
                 if (bimiData?._id) {
                     verificationResults.bimi = bimiData?._id;
+
+                    bimiResolution._has_bimi = 'yes';
+                    bimiResolution._bimi_cached_id = bimiData?._id.toString();
+                    bimiResolution._bimi_type = bimiData?.type;
+                    bimiResolution._bimi_url = bimiData?.url;
+                    bimiResolution._bimi_source = bimiData?.source;
                 } else {
                     verificationResults.bimi = false;
+                    bimiResolution._has_bimi = 'no';
                 }
             } catch (err) {
-                plugin.logerror('Failed to get BIMI logo: ' + err.stack, plugin, connection);
+                //plugin.logerror('Failed to get BIMI logo: ' + err.stack, plugin, connection);
                 verificationResults.bimi = false;
+
+                bimiResolution._failure = 'yes';
+                bimiResolution._error = err.message;
+                bimiResolution._err = err.code;
+
+                bimiResolution._bimi_source = err.source;
+
+                if (err.details && err.details.url) {
+                    bimiResolution._bimi_url = err.details.url;
+                    delete err.details.url;
+                }
+
+                if (err.details) {
+                    bimiResolution._bimi_data = JSON.stringify(err.details);
+                }
+            } finally {
+                plugin.loggelf(bimiResolution);
             }
         }
 
