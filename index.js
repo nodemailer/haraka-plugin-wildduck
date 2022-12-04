@@ -787,7 +787,7 @@ exports.real_rcpt_handler = function (next, connection, params) {
                 plugin.logdebug('No such user ' + address, plugin, connection);
                 resolution = {
                     _error: 'no such user',
-                    _unknwon_user: 'yes'
+                    _unknown_user: 'yes'
                 };
                 txn.notes.rejectCode = 'NO_SUCH_USER';
                 return hookDone(DENY, DSN.no_such_user());
@@ -829,7 +829,7 @@ exports.real_rcpt_handler = function (next, connection, params) {
                     if (!userData) {
                         resolution = {
                             _error: 'no such user',
-                            _unknwon_user: 'yes'
+                            _unknown_user: 'yes'
                         };
                         txn.notes.rejectCode = 'NO_SUCH_USER';
                         return hookDone(DENY, DSN.no_such_user());
