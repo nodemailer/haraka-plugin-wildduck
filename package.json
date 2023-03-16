@@ -1,6 +1,6 @@
 {
     "name": "haraka-plugin-wildduck",
-    "version": "1.37.1",
+    "version": "1.37.2",
     "description": "Haraka plugin for processing incoming messages for Wild Duck IMAP server",
     "main": "index.js",
     "scripts": {
@@ -26,7 +26,7 @@
     },
     "homepage": "https://github.com/nodemailer/haraka-plugin-wildduck#readme",
     "devDependencies": {
-        "eslint": "8.35.0",
+        "eslint": "8.36.0",
         "eslint-config-nodemailer": "1.2.0",
         "eslint-config-prettier": "8.7.0",
         "grunt": "1.6.1",
@@ -39,10 +39,10 @@
         "ioredis": "5.3.1",
         "libmime": "5.2.1",
         "mailauth": "4.3.1",
-        "mongodb": "4.12.1",
+        "mongodb": "4.14.0",
         "nodemailer": "6.9.1",
         "punycode": "2.3.0",
         "srs.js": "0.1.0",
-        "wildduck": "1.38.3"
+        "wildduck": "1.39.2"
     }
 }
