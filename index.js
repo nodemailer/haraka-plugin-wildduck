@@ -1385,6 +1385,7 @@ exports.hook_queue = function (next, connection) {
                             _to: recipient,
                             _mail_action: 'attachment',
                             _attachment_id: attachment.id,
+                            _encoded_sha256: attachment.encodedSha256,
                             _filename: attachment.filename,
                             _content_type: attachment.contentType,
                             _attachment_disposition: attachment.disposition,
