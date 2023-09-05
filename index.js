@@ -228,7 +228,7 @@ exports.handle_forwarding_address = async function (connection, address, address
         return false;
     }
 
-    const { forwards, autoreplies, users, forwardCounters } = txn.notes.targets;
+    const { forwards, autoreplies, /*users,*/ forwardCounters } = txn.notes.targets;
 
     const forwardLimit = addressData.forwards || txn.notes.settings['const:max:forwards'];
 
