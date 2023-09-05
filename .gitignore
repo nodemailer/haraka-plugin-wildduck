@@ -3,4 +3,3 @@ node_modules
 npm-debug.log
 .npmrc
 config/development.js
-package-lock.json*
