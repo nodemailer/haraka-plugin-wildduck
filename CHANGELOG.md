@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.8.2](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.1...v5.8.2) (2023-10-17)
+
+
+### Bug Fixes
+
+* **deps:** Bumped dependencies ([def43fb](https://github.com/nodemailer/haraka-plugin-wildduck/commit/def43fb9eaee7ac4ab76ccb91f38a33c41693d4f))
+
 ## [5.8.1](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.0...v5.8.1) (2023-09-05)
 
 
