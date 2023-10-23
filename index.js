@@ -35,6 +35,9 @@ DSN.rcpt_too_fast = () =>
         1
     );
 
+// default mbox_full is 450
+DSN.mbox_full_554 = () => DSN.create(554, 'Mailbox full', 2, 2);
+
 let defaultSpamRejectMessage =
     'Our system has detected that this message is likely unsolicited mail.\nTo reduce the amount of spam this message has been blocked.';
 
@@ -857,7 +860,7 @@ exports.real_rcpt_handler = function (next, connection, params) {
                             _default_address: rcpt.address() !== userData.address ? userData.address : ''
                         };
                         txn.notes.rejectCode = 'MBOX_FULL';
-                        return hookDone(DENY, DSN.mbox_full());
+                        return hookDone(DENY, DSN.mbox_full_554());
                     }
 
                     checkIpRateLimit(userData, () => {
