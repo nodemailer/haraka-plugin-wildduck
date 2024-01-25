@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.8.4](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.3...v5.8.4) (2024-01-25)
+
+
+### Bug Fixes
+
+* **dkim:** added additional dkim log entries ([bed5a64](https://github.com/nodemailer/haraka-plugin-wildduck/commit/bed5a640b041fe8370afa9dd55e83ae2ed67bee7))
+
 ## [5.8.3](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.2...v5.8.3) (2024-01-25)
 
 
