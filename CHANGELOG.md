@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.8.5](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.4...v5.8.5) (2024-01-25)
+
+
+### Bug Fixes
+
+* **dkim:** Log spf results in dkim signature log rows ([d93ae97](https://github.com/nodemailer/haraka-plugin-wildduck/commit/d93ae973b756271850f837d4897417910834485e))
+
 ## [5.8.4](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.3...v5.8.4) (2024-01-25)
 
 
