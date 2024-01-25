@@ -1,5 +1,13 @@
 # Changelog
 
+## [5.8.3](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.2...v5.8.3) (2024-01-25)
+
+
+### Bug Fixes
+
+* **dkim:** Log dkim signatures ([89a0b0b](https://github.com/nodemailer/haraka-plugin-wildduck/commit/89a0b0bbec4cca5a2b12f620d04220d01771915b))
+* **mbix_full:** Return a hard bounce for full mailbox ([d596226](https://github.com/nodemailer/haraka-plugin-wildduck/commit/d59622638b5599418ff062d5bd2ace1011c17f02))
+
 ## [5.8.2](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.1...v5.8.2) (2023-10-17)
 
 
