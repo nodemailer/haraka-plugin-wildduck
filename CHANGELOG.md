@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.8.6](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.5...v5.8.6) (2024-01-26)
+
+
+### Bug Fixes
+
+* **deps:** bumped mailauth ([7fc7781](https://github.com/nodemailer/haraka-plugin-wildduck/commit/7fc77814615c6426915778a79b5c366ec9c494a9))
+
 ## [5.8.5](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.4...v5.8.5) (2024-01-25)
 
 
