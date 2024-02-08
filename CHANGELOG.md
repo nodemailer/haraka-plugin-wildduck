@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.8.8](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.7...v5.8.8) (2024-02-08)
+
+
+### Bug Fixes
+
+* **logs:** added bimi and dmarc entries for dkim logs to graylog ([dca10a0](https://github.com/nodemailer/haraka-plugin-wildduck/commit/dca10a02b9e765327ee506ca7549b5d5e3911333))
+
 ## [5.8.7](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.6...v5.8.7) (2024-02-05)
 
 
