@@ -1,5 +1,13 @@
 # Changelog
 
+## [5.8.9](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.8...v5.8.9) (2024-02-12)
+
+
+### Bug Fixes
+
+* **logs:** do not log entire received chain ([102b4b0](https://github.com/nodemailer/haraka-plugin-wildduck/commit/102b4b0268c97c575090db38700e9ad02a03c26a))
+* **logs:** Log received chain comments ([#28](https://github.com/nodemailer/haraka-plugin-wildduck/issues/28)) ([3633ed2](https://github.com/nodemailer/haraka-plugin-wildduck/commit/3633ed20548ba1ff91fa1c0c8ac2b23c63d8886e))
+
 ## [5.8.8](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.7...v5.8.8) (2024-02-08)
 
 
