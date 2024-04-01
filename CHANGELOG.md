@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.8.10](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.9...v5.8.10) (2024-04-01)
+
+
+### Bug Fixes
+
+* **deps:** Bumped wildduck from 1.42.1 to 1.42.5 ([a97d048](https://github.com/nodemailer/haraka-plugin-wildduck/commit/a97d048ee240afa219adaf2d58c08c655bf66aeb))
+
 ## [5.8.9](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.8...v5.8.9) (2024-02-12)
 
 
