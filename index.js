@@ -491,6 +491,9 @@ exports.hook_max_data_exceeded = function (next, connection) {
 exports.init_wildduck_transaction = async function (connection) {
     const txn = connection.transaction;
 
+    // could be false on rcpt hook if mail hook didn't run
+    if (txn.notes.id) return
+
     txn.notes.id = new ObjectId();
     txn.notes.rateKeys = [];
     txn.notes.targets = {
@@ -542,24 +545,26 @@ exports.hook_rcpt = function (next, connection, params) {
 
     let runHandler = () => {
         clearTimeout(tryTimer);
-        plugin.real_rcpt_handler(
-            (...args) => {
-                clearTimeout(waitTimeout);
-                if (returned) {
-                    return;
-                }
-                returned = true;
-                let err = args && args[0];
-                if (err && /Error$/.test(err.name)) {
-                    connection.logerror(plugin, err);
-                    txn.notes.rejectCode = 'ERRC01';
-                    return next(DENYSOFT, 'Failed to process recipient, try again [ERRC01]');
-                }
-                next(...args);
-            },
-            connection,
-            params
-        );
+        plugin.init_wildduck_transaction(connection).then(() => {
+            plugin.real_rcpt_handler(
+                (...args) => {
+                    clearTimeout(waitTimeout);
+                    if (returned) {
+                        return;
+                    }
+                    returned = true;
+                    let err = args && args[0];
+                    if (err && /Error$/.test(err.name)) {
+                        connection.logerror(plugin, err);
+                        txn.notes.rejectCode = 'ERRC01';
+                        return next(DENYSOFT, 'Failed to process recipient, try again [ERRC01]');
+                    }
+                    next(...args);
+                },
+                connection,
+                params
+            );
+        })
     };
 
     // rcpt check requires access to the db which might not be available yet
@@ -594,15 +599,10 @@ exports.hook_rcpt = function (next, connection, params) {
     runCheck();
 };
 
-exports.real_rcpt_handler = async function (next, connection, params) {
+exports.real_rcpt_handler = function (next, connection, params) {
     const plugin = this;
     const txn = connection.transaction;
     const remoteIp = connection.remote_ip;
-
-    if (txn.notes.targets === undefined) {
-        // hook_mail wasn't run
-        await plugin.init_wildduck_transaction(connection);
-    }
 
     const { recipients, forwards, users } = txn.notes.targets;
 
