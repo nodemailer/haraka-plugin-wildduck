@@ -44,8 +44,8 @@ exports.register = function () {
     plugin.logdebug('Initializing Wild Duck plugin.');
     plugin.load_wildduck_ini();
 
-    plugin.register_hook('init_master', 'init_wildduck_shared');
-    plugin.register_hook('init_child', 'init_wildduck_shared');
+    plugin.register_hook('init_master', 'open_database');
+    plugin.register_hook('init_child', 'open_database');
 
     plugin.resolver = async (name, rr) => await dns.promises.resolve(name, rr);
 };
