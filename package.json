@@ -45,7 +45,7 @@
         "mailauth": "4.6.5",
         "mongodb": "4.17.0",
         "nodemailer": "6.9.13",
-        "punycode": "2.3.1",
+        "punycode.js": "2.3.1",
         "srs.js": "0.1.0",
         "wildduck": "1.42.5"
     }
