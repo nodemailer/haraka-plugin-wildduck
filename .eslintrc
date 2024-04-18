@@ -1,7 +1,7 @@
 {
     "rules": {
         "no-await-in-loop": 0,
-        "prefer-const": 0,
+        "prefer-const": 1,
     },
     "extends": ["nodemailer", "prettier", "@haraka"],
     "parserOptions": {
