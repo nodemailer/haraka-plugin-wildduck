@@ -203,7 +203,7 @@ exports.increment_forward_counters = async function (connection) {
             const ttlres = await plugin.ttlcounterAsync('wdf:' + key, increment, limit, false);
             connection.loginfo(plugin, `Forward counter updated for ${key} (${increment}/${limit}): ${JSON.stringify(ttlres)}`);
         } catch (err) {
-            connection.logerror(plugin, err);
+            connection.logerror(plugin, err.message);
         }
     }
 };
@@ -543,7 +543,7 @@ exports.hook_rcpt = function (next, connection, params) {
                     returned = true;
                     const err = args && args[0];
                     if (err && /Error$/.test(err.name)) {
-                        connection.logerror(plugin, err);
+                        connection.logerror(plugin, err.message);
                         txn.notes.rejectCode = 'ERRC01';
                         return next(DENYSOFT, 'Failed to process recipient, try again [ERRC01]');
                     }
@@ -1193,7 +1193,7 @@ exports.hook_queue = function (next, connection) {
                     .increment_forward_counters(connection)
                     .then(next)
                     .catch(err => {
-                        connection.logerror(plugin, err);
+                        connection.logerror(plugin, err.message);
                         next();
                     });
             }
