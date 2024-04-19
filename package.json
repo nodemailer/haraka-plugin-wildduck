@@ -5,6 +5,7 @@
     "main": "index.js",
     "scripts": {
         "lint": "npx eslint *.js lib",
+        "lint:fix": "npx eslint *.js lib --fix",
         "test": "grunt",
         "update": "rm -rf node_modules package-lock.json && ncu -u && npm install"
     },
