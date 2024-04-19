@@ -1,6 +1,6 @@
 'use strict';
 
-// disable config loading by Wild Duck
+// disable config loading by WildDuck
 process.env.DISABLE_WILD_CONFIG = 'true';
 
 const os = require('os');
@@ -41,7 +41,7 @@ const defaultSpamRejectMessage =
 
 exports.register = function () {
     const plugin = this;
-    plugin.logdebug('Initializing Wild Duck plugin.');
+    plugin.logdebug('Initializing WildDuck plugin.');
     plugin.load_wildduck_ini();
 
     plugin.register_hook('init_master', 'open_database');
@@ -480,7 +480,7 @@ exports.init_wildduck_transaction = async function (connection) {
     const txn = connection.transaction;
 
     // could be false on rcpt hook if mail hook didn't run
-    if (txn.notes.id) return
+    if (txn.notes.id) return;
 
     txn.notes.id = new ObjectId();
     txn.notes.rateKeys = [];
@@ -514,7 +514,7 @@ exports.hook_mail = function (next, connection, params) {
                 next();
             })
             .catch(err => next(err.smtpAction || DENYSOFT, err.message));
-    })
+    });
 };
 
 exports.hook_data_post = function (next, connection) {
@@ -552,7 +552,7 @@ exports.hook_rcpt = function (next, connection, params) {
                 connection,
                 params
             );
-        })
+        });
     };
 
     // rcpt check requires access to the db which might not be available yet
