@@ -5,6 +5,6 @@ module.exports = {
         'mongodb',
 
         // some api changes, need to address in the future
-        'eslint'
+        'eslint', 'grunt-eslint'
     ]
 };
