@@ -1,5 +1,14 @@
 # Changelog
 
+## [5.8.11](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.10...v5.8.11) (2024-04-19)
+
+
+### Bug Fixes
+
+* **eslint:** Lock eslint version to v8 ([6b93f19](https://github.com/nodemailer/haraka-plugin-wildduck/commit/6b93f19a5eb3b189c92170138bf5bc8f6ec1a762))
+* init_wildduck_transaction in index, in case hook_mail not run ([#33](https://github.com/nodemailer/haraka-plugin-wildduck/issues/33)) ([30374bd](https://github.com/nodemailer/haraka-plugin-wildduck/commit/30374bd3621f723ee6069eb5f5a6bdfff68c9934))
+* **logging:** If DMARC was missing, then logging failed with an error ([830ad7d](https://github.com/nodemailer/haraka-plugin-wildduck/commit/830ad7dfe7c0f38949d90d7a9ca97a3c22f0065d))
+
 ## [5.8.10](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.9...v5.8.10) (2024-04-01)
 
 
