@@ -44,8 +44,8 @@ exports.register = function () {
     plugin.logdebug('Initializing Wild Duck plugin.');
     plugin.load_wildduck_ini();
 
-    plugin.register_hook('init_master', 'init_wildduck_shared');
-    plugin.register_hook('init_child', 'init_wildduck_shared');
+    plugin.register_hook('init_master', 'open_database');
+    plugin.register_hook('init_child', 'open_database');
 
     plugin.resolver = async (name, rr) => await dns.promises.resolve(name, rr);
 };
@@ -64,7 +64,7 @@ exports.load_wildduck_ini = function () {
     );
 };
 
-exports.open_database = function (server, next) {
+exports.open_database = function (next, server) {
     const plugin = this;
 
     plugin.srsRewriter = new SRS({
@@ -129,13 +129,7 @@ exports.open_database = function (server, next) {
             plugin.db.messageHandler.loggelf = message => plugin.loggelf(message);
             plugin.db.userHandler.loggelf = message => plugin.loggelf(message);
 
-            plugin.maildrop = new Maildropper({
-                db,
-                enabled: plugin.cfg.sender.enabled,
-                zone: plugin.cfg.sender.zone,
-                collection: plugin.cfg.sender.collection,
-                gfs: plugin.cfg.sender.gfs
-            });
+            plugin.maildrop = new Maildropper({ db, ...plugin.cfg.sender });
 
             plugin.filterHandler = new FilterHandler({
                 db,
@@ -192,12 +186,6 @@ exports.normalize_address = function (address) {
     }
 
     return tools.normalizeAddress(address.address());
-};
-
-exports.init_wildduck_shared = function (next, server) {
-    const plugin = this;
-
-    plugin.open_database(server, next);
 };
 
 exports.increment_forward_counters = async function (connection) {
