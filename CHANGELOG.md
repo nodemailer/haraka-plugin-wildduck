@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.8.12](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.11...v5.8.12) (2024-04-22)
+
+
+### Bug Fixes
+
+* **deps:** Bumped WildDuck ([3b496f8](https://github.com/nodemailer/haraka-plugin-wildduck/commit/3b496f8b2ad814b4acdc3670eea6dd775125032a))
+
 ## [5.8.11](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.10...v5.8.11) (2024-04-19)
 
 
