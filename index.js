@@ -42,7 +42,7 @@ const defaultSpamRejectMessage =
 exports.register = function () {
     const plugin = this;
     plugin.logdebug('Initializing WildDuck plugin.');
-    plugin.load_wildduck_ini();
+    plugin.load_wildduck_cfg();
 
     plugin.register_hook('init_master', 'open_database');
     plugin.register_hook('init_child', 'open_database');
@@ -50,16 +50,15 @@ exports.register = function () {
     plugin.resolver = async (name, rr) => await dns.promises.resolve(name, rr);
 };
 
-exports.load_wildduck_ini = function () {
-    const plugin = this;
+exports.load_wildduck_cfg = function () {
 
-    plugin.cfg = plugin.config.get(
+    this.cfg = this.config.get(
         'wildduck.yaml',
         {
             booleans: ['attachments.decodeBase64', 'sender.enabled']
         },
         () => {
-            plugin.load_wildduck_ini();
+            this.load_wildduck_cfg();
         }
     );
 };
@@ -350,7 +349,7 @@ exports.handle_forwarding_address = async function (connection, address, address
 exports.hook_deny = function (next, connection, params) {
     const plugin = this;
     const txn = connection.transaction;
-    const remoteIp = connection.remote_ip;
+    const remoteIp = connection.remote.ip;
 
     if (txn === null) {
         next();
@@ -431,7 +430,7 @@ exports.hook_max_data_exceeded = function (next, connection) {
     const plugin = this;
 
     const txn = connection.transaction;
-    const remoteIp = connection.remote_ip;
+    const remoteIp = connection.remote.ip;
 
     if (txn === null) {
         next();
@@ -518,8 +517,7 @@ exports.hook_mail = function (next, connection, params) {
 };
 
 exports.hook_data_post = function (next, connection) {
-    const plugin = this;
-    return hookDataPost(next, plugin, connection);
+    return hookDataPost(next, this, connection);
 };
 
 exports.hook_rcpt = function (next, connection, params) {
@@ -943,7 +941,7 @@ exports.hook_queue = function (next, connection) {
     const plugin = this;
     const txn = connection.transaction;
     const queueId = txn.uuid;
-    const remoteIp = connection.remote_ip;
+    const remoteIp = connection.remote.ip;
     const { forwards, autoreplies, users } = txn.notes.targets;
 
     const transhost = connection.hello.host;
