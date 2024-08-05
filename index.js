@@ -51,7 +51,6 @@ exports.register = function () {
 };
 
 exports.load_wildduck_cfg = function () {
-
     this.cfg = this.config.get(
         'wildduck.yaml',
         {
@@ -588,7 +587,7 @@ exports.hook_rcpt = function (next, connection, params) {
 exports.real_rcpt_handler = function (next, connection, params) {
     const plugin = this;
     const txn = connection.transaction;
-    const remoteIp = connection.remote_ip;
+    const remoteIp = connection.remote.ip;
 
     const { recipients, forwards, users } = txn.notes.targets;
 
