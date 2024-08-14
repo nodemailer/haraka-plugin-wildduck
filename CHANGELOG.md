@@ -1,5 +1,14 @@
 # Changelog
 
+## [5.8.13](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.12...v5.8.13) (2024-08-08)
+
+
+### Bug Fixes
+
+* **auth-spf:** ZMS-165. if remote IP is private default to softfail with custom message ([#42](https://github.com/nodemailer/haraka-plugin-wildduck/issues/42)) ([0198c4f](https://github.com/nodemailer/haraka-plugin-wildduck/commit/0198c4fa6a3518cf2356ea3bf86e0081e93a5540))
+* Bumped deps ([21a9934](https://github.com/nodemailer/haraka-plugin-wildduck/commit/21a99345a723b6b441b07dde5c8bb46c0b549ebc))
+* **connection-object:** remove_ip -&gt; remove.ip. Otherwise shows undefined ([#40](https://github.com/nodemailer/haraka-plugin-wildduck/issues/40)) ([24a6a20](https://github.com/nodemailer/haraka-plugin-wildduck/commit/24a6a2077d8390de36c40f1f8be46e3a33485e04))
+
 ## [5.8.12](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.11...v5.8.12) (2024-04-22)
 
 
