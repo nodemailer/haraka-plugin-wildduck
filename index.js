@@ -873,6 +873,9 @@ exports.real_rcpt_handler = function (next, connection, params) {
                             _user: userData._id.toString(),
                             _error: 'user over quota',
                             _over_quota: 'yes',
+                            _max_quota: quota,
+                            _quota_source: userData.quota ? 'user' : 'config',
+                            _storage_used: userData.storageUsed,
                             _default_address: rcpt.address() !== userData.address ? userData.address : ''
                         };
                         txn.notes.rejectCode = 'MBOX_FULL';
