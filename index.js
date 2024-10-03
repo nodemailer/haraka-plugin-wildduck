@@ -403,7 +403,16 @@ exports.hook_deny = function (next, connection, params) {
         if (headerFrom) {
             logdata._header_from = headerFrom.address;
             logdata._header_from_name = headerFrom.provided && headerFrom.provided.name;
-            logdata._header_from_value = txn.header.get_all('From').join('; ');
+
+            let fromHeadersValue = txn.header.get_all('From').join('; ');
+
+            try {
+                fromHeadersValue = libmime.decodeWords(fromHeadersValue);
+            } catch {
+                // return as is
+            }
+
+            logdata._header_from_value = fromHeadersValue;
         }
 
         const err = params && params[1];
