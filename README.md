@@ -33,3 +33,9 @@ This is the only delivery plugin you need to use Haraka with WildDuck. Make sure
 For antispam, WildDuck supports [Haraka's Rspamd plugin](https://www.npmjs.com/package/haraka-plugin-rspamd). WildDuck uses Rspamd output to route messages marked as spam to the Junk mailbox.
 
 This plugin includes SPF and DKIM support. You should not enable Haraka's built-in SPF or dkim_verify plugins.
+
+## License
+
+European Union Public License 1.1 ([details](http://ec.europa.eu/idabc/eupl.html)) or later
+
+> WildDuck plugin for Haraka (`haraka-plugin-wildduck`) is part of the Zone Mail Suite (ZMS). Suite of programs and modules for an efficient, fast and modern email server.
