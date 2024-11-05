@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.8.15](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.14...v5.8.15) (2024-11-05)
+
+
+### Bug Fixes
+
+* **bimi:** Bumped mailauth for BIMI CMC support ([94ad9f4](https://github.com/nodemailer/haraka-plugin-wildduck/commit/94ad9f4414d7ce65ef34f1c5364393e4cefd9840))
+
 ## [5.8.14](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.13...v5.8.14) (2024-10-28)
 
 
