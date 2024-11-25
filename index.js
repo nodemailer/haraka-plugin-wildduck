@@ -792,8 +792,8 @@ exports.real_rcpt_handler = function (next, connection, params) {
 
             if (addressData.address.includes('*')) {
                 // wildcard/catchall address received email
-                const originalRcpHeaderName = plugin.cfg?.originalRcptHeader || 'X-Original-Rcpt';
-                txn.add_header(originalRcpHeaderName, address);
+                const originalRcptHeaderName = plugin.cfg?.originalRcptHeader || 'X-Original-Rcpt';
+                txn.add_header(originalRcptHeaderName, address);
             }
 
             if (addressData && addressData.targets) {
