@@ -100,3 +100,5 @@ auth:
 
     # If a public key has fewer bits than required, then DKIM and ARC keys are considered failing by policy
     minBitLength: 1024
+
+originalRcptHeader: 'X-Zone-Original-Rcpt'

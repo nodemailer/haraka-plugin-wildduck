@@ -790,6 +790,12 @@ exports.real_rcpt_handler = function (next, connection, params) {
                 return hookDone(err);
             }
 
+            if (addressData.address.includes('*')) {
+                // wildcard/catchall address received email
+                const originalRcptHeaderName = plugin.cfg?.originalRcptHeader || 'X-Original-Rcpt';
+                txn.add_header(originalRcptHeaderName, address);
+            }
+
             if (addressData && addressData.targets) {
                 return plugin
                     .handle_forwarding_address(connection, address, addressData)
