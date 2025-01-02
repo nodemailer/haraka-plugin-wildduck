@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.8.16](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.15...v5.8.16) (2024-12-23)
+
+
+### Bug Fixes
+
+* **catchall-header:** ZMS-184 ([#49](https://github.com/nodemailer/haraka-plugin-wildduck/issues/49)) ([6ca9d00](https://github.com/nodemailer/haraka-plugin-wildduck/commit/6ca9d009966b860c201e8b0c7c24856263369c3e))
+
 ## [5.8.15](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.14...v5.8.15) (2024-11-05)
 
 
