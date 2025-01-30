@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.8.18](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.17...v5.8.18) (2025-01-30)
+
+
+### Bug Fixes
+
+* **update-deps:** update wd dep ([#54](https://github.com/nodemailer/haraka-plugin-wildduck/issues/54)) ([e6c3f71](https://github.com/nodemailer/haraka-plugin-wildduck/commit/e6c3f715c1dec2d5372189d21458a35255ab57f1))
+
 ## [5.8.17](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.16...v5.8.17) (2025-01-20)
 
 
