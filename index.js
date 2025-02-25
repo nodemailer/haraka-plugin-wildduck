@@ -843,7 +843,8 @@ exports.real_rcpt_handler = function (next, connection, params) {
                     spamLevel: true,
                     storageUsed: true,
                     quota: true,
-                    tagsview: true
+                    tagsview: true,
+                    mtaRelay: true
                 },
                 (err, userData) => {
                     if (err) {
@@ -1149,6 +1150,15 @@ exports.hook_queue = function (next, connection) {
                 }))) ||
             false;
 
+        let user;
+
+        for (const availableUser of users.values()) {
+            if (availableUser.userData?.address === txn.notes.sender) {
+                // current user
+                user = availableUser.userData;
+            }
+        }
+
         const mail = {
             parentId: txn.notes.id,
             reason: 'forward',
@@ -1160,6 +1170,10 @@ exports.hook_queue = function (next, connection) {
 
             interface: 'forwarder'
         };
+
+        if (user) {
+            mail.mtaRelay = user.mtaRelay || false;
+        }
 
         const message = plugin.maildrop.push(mail, (err, ...args) => {
             if (err || !args[0]) {
