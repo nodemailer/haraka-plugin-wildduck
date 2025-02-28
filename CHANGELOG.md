@@ -1,5 +1,45 @@
 # Changelog
 
+## [5.8.18](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.17...v5.8.18) (2025-01-30)
+
+
+### Bug Fixes
+
+* **update-deps:** update wd dep ([#54](https://github.com/nodemailer/haraka-plugin-wildduck/issues/54)) ([e6c3f71](https://github.com/nodemailer/haraka-plugin-wildduck/commit/e6c3f715c1dec2d5372189d21458a35255ab57f1))
+
+## [5.8.17](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.16...v5.8.17) (2025-01-20)
+
+
+### Bug Fixes
+
+* **catchall-address:** ZMS-184-2 ([#51](https://github.com/nodemailer/haraka-plugin-wildduck/issues/51)) ([7ce263c](https://github.com/nodemailer/haraka-plugin-wildduck/commit/7ce263cd7539c6cb939e54b33cf9edb7283cdc76))
+
+## [5.8.16](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.15...v5.8.16) (2024-12-23)
+
+
+### Bug Fixes
+
+* **catchall-header:** ZMS-184 ([#49](https://github.com/nodemailer/haraka-plugin-wildduck/issues/49)) ([6ca9d00](https://github.com/nodemailer/haraka-plugin-wildduck/commit/6ca9d009966b860c201e8b0c7c24856263369c3e))
+
+## [5.8.15](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.14...v5.8.15) (2024-11-05)
+
+
+### Bug Fixes
+
+* **bimi:** Bumped mailauth for BIMI CMC support ([94ad9f4](https://github.com/nodemailer/haraka-plugin-wildduck/commit/94ad9f4414d7ce65ef34f1c5364393e4cefd9840))
+
+## [5.8.14](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.13...v5.8.14) (2024-10-28)
+
+
+### Bug Fixes
+
+* **cicd-pipeline:** Docker setup release ([#43](https://github.com/nodemailer/haraka-plugin-wildduck/issues/43)) ([691aed5](https://github.com/nodemailer/haraka-plugin-wildduck/commit/691aed559eb40778fdda20956c8cf7b3f9c11d01))
+* **deps:** Bumped dependencies ([5472b04](https://github.com/nodemailer/haraka-plugin-wildduck/commit/5472b04dce3a368819dd49ddbfca07df0706db90))
+* **license-readme-copyright:** ZMS-180 ([#47](https://github.com/nodemailer/haraka-plugin-wildduck/issues/47)) ([57e68aa](https://github.com/nodemailer/haraka-plugin-wildduck/commit/57e68aacfda4d0281883bcbb2b5da5b3d30100db))
+* **log-filecontenthash:** add attachment file content hash logging through graylog ZMS-176 ([#45](https://github.com/nodemailer/haraka-plugin-wildduck/issues/45)) ([1fabcf4](https://github.com/nodemailer/haraka-plugin-wildduck/commit/1fabcf4e4616469a9a9103cb4d087db04b890c5f))
+* **log-headerfromvalue:** graylog header from value should be MIME decoded before logging ZMS-138 ([#46](https://github.com/nodemailer/haraka-plugin-wildduck/issues/46)) ([11f71a0](https://github.com/nodemailer/haraka-plugin-wildduck/commit/11f71a05c7532ad7c581232640e73b722bb55563))
+* **logs:** Log quota information when account over quota ([b1ba829](https://github.com/nodemailer/haraka-plugin-wildduck/commit/b1ba829cd91ea5d34ae38b29ed1615a30b86b9a8))
+
 ## [5.8.13](https://github.com/nodemailer/haraka-plugin-wildduck/compare/v5.8.12...v5.8.13) (2024-08-08)
 
 

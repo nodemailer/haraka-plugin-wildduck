@@ -403,7 +403,16 @@ exports.hook_deny = function (next, connection, params) {
         if (headerFrom) {
             logdata._header_from = headerFrom.address;
             logdata._header_from_name = headerFrom.provided && headerFrom.provided.name;
-            logdata._header_from_value = txn.header.get_all('From').join('; ');
+
+            let fromHeadersValue = txn.header.get_all('From').join('; ');
+
+            try {
+                fromHeadersValue = libmime.decodeWords(fromHeadersValue);
+            } catch {
+                // return as is
+            }
+
+            logdata._header_from_value = fromHeadersValue;
         }
 
         const err = params && params[1];
@@ -779,6 +788,12 @@ exports.real_rcpt_handler = function (next, connection, params) {
                 };
                 err.code = err.code || 'ResolveAddress';
                 return hookDone(err);
+            }
+
+            if (addressData && addressData.address && addressData.address.includes('*')) {
+                // wildcard/catchall address received email
+                const originalRcptHeaderName = plugin.cfg?.originalRcptHeader || 'X-Original-Rcpt';
+                txn.add_header(originalRcptHeaderName, address);
             }
 
             if (addressData && addressData.targets) {
@@ -1413,7 +1428,8 @@ exports.hook_queue = function (next, connection) {
                             _attachment_disposition: attachment.disposition,
                             _attachment_size: attachment.size,
                             _attachment_encoding: attachment.transferEncoding,
-                            _attachment_count: response.attachments.length
+                            _attachment_count: response.attachments.length,
+                            _attachment_sha256: attachment.fileContentHash
                         });
                     });
                 }
