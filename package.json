@@ -11,7 +11,7 @@
     },
     "repository": {
         "type": "git",
-        "url": "git://github.com/nodemailer/haraka-plugin-wildduck.git"
+        "url": "git://github.com/zone-eu/haraka-plugin-wildduck.git"
     },
     "keywords": [
         "MX",
@@ -25,9 +25,9 @@
     "author": "Andris Reinman",
     "license": "EUPL-1.1+",
     "bugs": {
-        "url": "https://github.com/nodemailer/haraka-plugin-wildduck/issues"
+        "url": "https://github.com/zone-eu/haraka-plugin-wildduck/issues"
     },
-    "homepage": "https://github.com/nodemailer/haraka-plugin-wildduck#readme",
+    "homepage": "https://github.com/zone-eu/haraka-plugin-wildduck#readme",
     "devDependencies": {
         "eslint": "8.57.0",
         "eslint-config-nodemailer": "1.2.0",
