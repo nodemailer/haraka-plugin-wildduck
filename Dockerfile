@@ -4,7 +4,7 @@ RUN apk add --no-cache git python3 py3-pip make g++
 
 WORKDIR /app
 
-RUN git clone https://github.com/haraka/Haraka.git ./ --branch master
+RUN git clone -b v3.0.5 https://github.com/haraka/Haraka.git ./
 RUN npm install --production
 RUN npm install haraka-plugin-wildduck
 
